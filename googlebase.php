@@ -1,5 +1,8 @@
 <?php
 
+if (!defined('_PS_VERSION_'))
+	exit;
+	
 class GoogleBase extends Module
 {
 	private $_html = '';
@@ -22,12 +25,9 @@ class GoogleBase extends Module
 
 	public function __construct()
 	{
-		global $cookie;
-		
 		$version_mask = explode('.', _PS_VERSION_, 3);
 		
 		$this->_compat = (int)($version_mask[0]*10)+$version_mask[1];
-		$this->_cookie = $cookie;
 		$this->_warnings = array();
 		$this->_mod_errors = array();
 		
@@ -39,6 +39,13 @@ class GoogleBase extends Module
 		$this->need_instance = 0;
 		
 		parent::__construct();
+		
+		if ($this->_compat < 15) {
+			global $cookie;
+			$this->_cookie = $cookie;
+		} else {
+			$this->_cookie = $this->context->cookie;
+		}
 		
 		// Set default config values if they don't already exist (here for compatibility in case the user doesn't uninstall/install at upgrade)
 		// Also set global "macro" data for the feed and check for store configuration changes
@@ -293,7 +300,7 @@ class GoogleBase extends Module
 	private function _processProduct($product)
 	{
 		$item_data = '';
-			$product_link = $this->_getCompatibleProductLink($product);
+		$product_link = $this->_getCompatibleProductLink($product);
 		$image_links = $this->_getCompatibleImageLinks($product);
 		
 		// Reference page: http://www.google.com/support/merchants/bin/answer.py?answer=188494
@@ -394,13 +401,14 @@ class GoogleBase extends Module
 				}
 			break;
 		  
+			case '15':
 			case '14':
 				if (isset($images[0])) {
 					$image_data[0]['link'] = $link->getImageLink($product['link_rewrite'], (int)$product['id_product'].'-'.(int)$images[0]['id_image']);
 					$image_data[0]['valid'] = 1;
 				}
 				if (isset($images[1])) {
-					$image_data[1]['link'] = $link->getImageLink($product['link_rewrite'], (int)$product['id_product'].'-'.(int)$images[1]['id_image']);;
+					$image_data[1]['link'] = $link->getImageLink($product['link_rewrite'], (int)$product['id_product'].'-'.(int)$images[1]['id_image']);
 					$image_data[1]['valid'] = 1;
 				}
 			break;
@@ -434,9 +442,13 @@ class GoogleBase extends Module
 			case '12':
 				$product_link = $link->getProductLink((int)($product['id_product']), $product['link_rewrite'], $this->_getrawCatRewrite($product['id_category_default']), $product['ean13']);
 			break;
-		  
-			default:
+		
+			case '13':
 				$product_link = $link->getProductLink((int)($product['id_product']), $product['link_rewrite'], $this->_getrawCatRewrite($product['id_category_default']), $product['ean13'], (int)$this->id_lang);
+			break;
+		
+			default:
+				$product_link = $link->getProductLink($product, null, null, null, (int)$this->id_lang);
 			break;
 		}
 		
