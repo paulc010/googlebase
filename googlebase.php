@@ -24,9 +24,9 @@ class GoogleBase extends Module
 	{
 		global $cookie;
 
-    $version_mask = explode('.', _PS_VERSION_, 2);
+    $version_mask = explode('.', _PS_VERSION_, 3);
 
-    $this->_compat = (int)implode('', $version_mask);
+    $this->_compat = (int)($version_mask[0]*10)+$version_mask[1];
     $this->_cookie = $cookie;
     $this->_warnings = array();
     $this->_mod_errors = array();
@@ -35,7 +35,8 @@ class GoogleBase extends Module
 		$this->tab = $this->_compat > 13 ? 'advertising_marketing' : 'Tools';
     if ($this->_compat > 13)
       $this->author = 'eCartService.net';
-		$this->version = '0.7.3.5';
+		$this->version = '0.8';
+		$this->need_instance = 0;
 
 		parent::__construct();
 
@@ -191,7 +192,11 @@ class GoogleBase extends Module
 
 		$pipe = ' > ';
 
-		$category_name = Category::hideCategoryPosition($category->name);
+		if ($this->_compat < 15) {
+			$category_name = Category::hideCategoryPosition($category->name);
+		} else {
+			$category_name = $category->name;
+		}
 
 		if ($path != $category_name)
 			$path = $category_name.($path!='' ? $pipe.$path : '');
@@ -293,7 +298,8 @@ class GoogleBase extends Module
 
   private function _processProduct($product)
   {
-    $product_link = $this->_getCompatibleProductLink($product);
+    $item_data = '';
+		$product_link = $this->_getCompatibleProductLink($product);
     $image_links = $this->_getCompatibleImageLinks($product);
 
     // Reference page: http://www.google.com/support/merchants/bin/answer.py?answer=188494
@@ -310,7 +316,7 @@ class GoogleBase extends Module
       $item_data .= $this->_xmlElement('g:image_link',$image_links[0]['link']);
     if ($image_links[1]['valid'] == 1)
       $item_data .= $this->_xmlElement('g:additional_image_link',$image_links[1]['link']);
-    if ((int)$this->compat > 13)
+    if ((int)$this->_compat > 13)
       $item_data .= $this->_xmlElement('g:condition', $this->_getCompatibleCondition($product['condition']));
     else
       $item_data .= $this->_xmlElement('g:condition',$this->_getCompatibleCondition($this->default_condition));
@@ -742,7 +748,7 @@ class GoogleBase extends Module
     $languages = array();
 
     $result = Db::getInstance()->ExecuteS("
-		SELECT `id_lang`, `name`, `iso_code`
+		SELECT `id_lang`, `name`, `iso_code`, `active`
 		FROM `"._DB_PREFIX_."lang` WHERE `active` = '1'");
 
 		foreach ($result AS $row)
