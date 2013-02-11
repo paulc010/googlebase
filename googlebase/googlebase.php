@@ -347,11 +347,11 @@ class GoogleBase extends Module
 		// 3. Unique Product Identifiers
 		if ($product['manufacturer_name'])
 			$item_data .= $this->_xmlElement('g:brand',$product['manufacturer_name'], true);
-		if ($this->gtin_field == 'ean13')
+		if ($this->gtin_field == 'ean13' && !empty($product['ean13']))
 			$item_data .= $this->_xmlElement('g:gtin', sprintf('%1$013d',$product['ean13']));
-		else if ($this->gtin_field == 'upc')
+		else if ($this->gtin_field == 'upc' && !empty($product['upc']))
 			$item_data .= $this->_xmlElement('g:gtin',sprintf('%1$012d',$product['upc']));
-		if ($this->use_supplier)
+		if ($this->use_supplier && !empty($product['supplier_reference']))
 			$item_data .= $this->_xmlElement('g:mpn',$product['supplier_reference']);
 		
 		// 7. Nearby Stores (US & UK only)
