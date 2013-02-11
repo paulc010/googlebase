@@ -385,7 +385,11 @@ class GoogleBase extends Module
 	
 	private function _getCompatibleImageLinks($product)
 	{
-		$link = new Link();
+		if ($this->_compat > 14) {
+			$link = $this->context->link;
+		} else {
+			$link = new Link();
+		}
 		$image_data = array(array('link' => '', 'valid' => 0), array('link' => '', 'valid' => 0));
 		$images = Image::getImages($this->id_lang, $product['id_product']);
 		
@@ -430,7 +434,11 @@ class GoogleBase extends Module
 	
 	private function _getCompatibleProductLink($product)
 	{
-		$link = new Link();
+		if ($this->_compat > 14) {
+			$link = $this->context->link;
+		} else {
+			$link = new Link();
+		}
 		switch ($this->_compat) {
 			case '11':
 				$product_link = $link->getProductLink($product['id_product'], $product['link_rewrite']);
