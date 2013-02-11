@@ -17,6 +17,10 @@ CHANGELOG
 
 - Modified urls for <g:link/>, <g:image_link/> and <g:additional_image_link/> to encode entities.
 - Use context for "Link" object
+- Fixed <g:availability/> (robert@irrelevant.com)
+- Modified logic for CategoryPosition, in case of legacy upgraded store (robert@irrelevant.com)
+- Omit some formatted numeric fields if empty, e.g. <g:gtin/>. Note that the feed will still be invalid as 2 of 3 rule applies to <g:gtin/>, <g:mpn/> and <g:brand/>
+- Allow description to be used (with pre-processing) should the short description be empty (robert@irrelevant.com)
 
 10/02/2013
 -------------
