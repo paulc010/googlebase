@@ -309,21 +309,29 @@ class GoogleBase extends Module
 		
 		$item_data .= $this->_xmlElement('g:id',"pc".$this->lang_iso."-".$product['id_product']);
 		$item_data .= $this->_xmlElement('title',$product['name'], true);
-		$item_data .= $this->_xmlElement('description','<![CDATA['.$product['description_short'].']]>');
+		
+		// Try our best to get a decent description
+		$description = trim(strip_tags(strlen($product['description_short']) ? $product['description_short'] :  $product['description'] ));
+		// Remove invalid characters that may have been inserted incorrectly
+		$description = preg_replace('/[^\x0A\x0D\x20-\x7F]/',"", $description);
+		$item_data .= $this->_xmlElement('description','<![CDATA['.$description.']]>');
 		// google product category <g:google_product_category /> - Google's category of the item (TODO: support this!)
+		
+		
 		$item_data .= $this->_xmlElement('g:product_type',$this->getPath($product['id_category_default']));
 		$item_data .= $this->_xmlElement('link',$product_link, true);
 		if ($image_links[0]['valid'] == 1)
 			$item_data .= $this->_xmlElement('g:image_link',$image_links[0]['link'], true);
 		if ($image_links[1]['valid'] == 1)
 			$item_data .= $this->_xmlElement('g:additional_image_link',$image_links[1]['link'], true);
+		
 		if ((int)$this->_compat > 13)
 			$item_data .= $this->_xmlElement('g:condition', $this->_getCompatibleCondition($product['condition']));
 		else
 			$item_data .= $this->_xmlElement('g:condition',$this->_getCompatibleCondition($this->default_condition));
 		
 		// 2. Availability & Price
-		$item_data .= $this->_xmlElement('g:availability',$this->getAvailability($product['quantity']));
+		$item_data .= $this->_xmlElement('g:availability',$this->getAvailability($product));
 		// Price is WITHOUT any reduction
 		$price = $this->_getCompatiblePrice($product['id_product']);
 		$item_data .= $this->_xmlElement('g:price', $price);
@@ -701,14 +709,14 @@ class GoogleBase extends Module
 		}
 	}
 	
-	public function getAvailability($quantity)
+	public function getAvailability($product)
 	{
-		if ($quantity > 0)
-			return $this->l('in stock');
-		else if ($quantity = 0 && !Configuration::get('PS_STOCK_MANAGEMENT'))
-			return $this->l('available for order');
-		else
-			return $this->l('out of stock');
+		if ($product["quantity"]> 0)
+      return $this->l('in stock');
+    else if ( self::checkQty($product,1))
+      return $this->l('available for order');
+    else
+      return $this->l('out of stock');
 	}
 	
 	public function getCurrencies($object = true, $active = 1)
@@ -749,5 +757,21 @@ class GoogleBase extends Module
 			  $languages[(int)($row['id_lang'])] = array('id_lang' => (int)($row['id_lang']), 'name' => $row['name'], 'iso_code' => $row['iso_code'], 'active' => (int)($row['active']));
 		
 		return $languages;
+	}
+	
+	private function checkQty($product, $qty)	// copied and amended form classes/Product.php
+	{
+		if (Pack::isPack((int)$product['id_product']) && !Pack::isInStock((int)$product['id_product']))
+			return false;
+
+		if (Product::isAvailableWhenOutOfStock(StockAvailable::outOfStock($product['id_product'])))
+			return true;
+
+//		if (isset($this->id_product_attribute))
+//			$id_product_attribute = $this->id_product_attribute;
+//		else
+			$id_product_attribute = 0;
+
+		return ($qty <= StockAvailable::getQuantityAvailableByProduct($product['id_product'], $id_product_attribute));
 	}
 }
