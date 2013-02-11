@@ -191,7 +191,7 @@ class GoogleBase extends Module
 		$category = new Category(intval($id_category), intval(Configuration::get($this->name.'_lang')));
 	
 		if (!Validate::isLoadedObject($category))
-			die (Tools::displayError());
+			die (Tools::displayError('Failed to load category id= '.$id_category));
   
 		if ($category->id == 1)
 			return htmlentities($path);
