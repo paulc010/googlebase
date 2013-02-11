@@ -312,11 +312,11 @@ class GoogleBase extends Module
 		$item_data .= $this->_xmlElement('description','<![CDATA['.$product['description_short'].']]>');
 		// google product category <g:google_product_category /> - Google's category of the item (TODO: support this!)
 		$item_data .= $this->_xmlElement('g:product_type',$this->getPath($product['id_category_default']));
-		$item_data .= $this->_xmlElement('link',$product_link);
+		$item_data .= $this->_xmlElement('link',$product_link, true);
 		if ($image_links[0]['valid'] == 1)
-			$item_data .= $this->_xmlElement('g:image_link',$image_links[0]['link']);
+			$item_data .= $this->_xmlElement('g:image_link',$image_links[0]['link'], true);
 		if ($image_links[1]['valid'] == 1)
-			$item_data .= $this->_xmlElement('g:additional_image_link',$image_links[1]['link']);
+			$item_data .= $this->_xmlElement('g:additional_image_link',$image_links[1]['link'], true);
 		if ((int)$this->_compat > 13)
 			$item_data .= $this->_xmlElement('g:condition', $this->_getCompatibleCondition($product['condition']));
 		else
