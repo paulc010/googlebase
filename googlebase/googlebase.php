@@ -261,6 +261,7 @@ class GoogleBase extends Module
 			foreach ($products AS $product) {
 			 	if ($product['active']) {
 					$items .= "<item>\n";
+					//echo '<pre>'.print_r($product, true).'</pre>';
 					$items .= $this->_processProduct($product);
 					$items .= "</item>\n\n";
 				}
@@ -351,9 +352,16 @@ class GoogleBase extends Module
 			$item_data .= $this->_xmlElement('g:gtin', sprintf('%1$013d',$product['ean13']));
 		else if ($this->gtin_field == 'upc' && !empty($product['upc']))
 			$item_data .= $this->_xmlElement('g:gtin',sprintf('%1$012d',$product['upc']));
-		if ($this->use_supplier && !empty($product['supplier_reference']))
-			$item_data .= $this->_xmlElement('g:mpn',$product['supplier_reference']);
+		if ($this->_compat < 15) {
+			if ($this->use_supplier && !empty($product['supplier_reference']));
+				$item_data .= $this->_xmlElement('g:mpn',$product['supplier_reference']);
+		} else {
+			if (isset($product['id_supplier']) && !empty($product['id_supplier'])) {
+				$item_data .= $this->_xmlElement('g:mpn',ProductSupplier::getProductSupplierReference($product['id_product'], 0, $product['id_supplier']));
+			}
+		}
 		
+			
 		// 7. Nearby Stores (US & UK only)
 		if ($this->nearby and $this->_compat > 13)
 			$item_data .= $this->_xmlElement('g:online_only',$product['online_only'] == 1 ? 'y' : 'n');
