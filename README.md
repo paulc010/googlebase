@@ -16,6 +16,7 @@ CHANGELOG
 -------------
 
 - Modified urls for <g:link/>, <g:image_link/> and <g:additional_image_link/> to encode entities.
+- Use context for "Link" object
 
 10/02/2013
 -------------
