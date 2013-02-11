@@ -201,7 +201,7 @@ class GoogleBase extends Module
 		if ($this->_compat < 15) {
 			$category_name = Category::hideCategoryPosition($category->name);
 		} else {
-			$category_name = $category->name;
+			$category_name = preg_replace('/^[0-9]+\./', '', $category->name);
 		}
   
 		if ($path != $category_name)
