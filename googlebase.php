@@ -19,6 +19,11 @@ class GoogleBase extends Module
 	private $lang_iso;
 	private $id_currency;
 	private $currencies;
+  	private $country;
+  	private $target_country;
+  	private $default_tax;
+  	private $ignore_tax;
+  	private $ignore_shipping;
 	private $gtin_field;
 	private $use_supplier;
 	private $nearby;
@@ -85,6 +90,12 @@ class GoogleBase extends Module
 			Configuration::updateValue($this->name.'_currency', (int)Configuration::get('PS_CURRENCY_DEFAULT'));
 		if (!Configuration::get($this->name.'_condition'))
 			Configuration::updateValue($this->name.'_condition', 'new');
+      	if (!Configuration::get($this->name.'_country'))
+        	Configuration::updateValue($this->name.'_country', 'United Kingdom');
+      	if (!Configuration::get($this->name.'_ignore_tax'))
+        	Configuration::updateValue($this->name.'_ignore_tax', 0);
+      	if (!Configuration::get($this->name.'_ignore_shipping'))
+        	Configuration::updateValue($this->name.'_ignore_shipping', 0);
 	
 		$this->_getGlobals();
 	
@@ -124,6 +135,17 @@ class GoogleBase extends Module
 		}
 	  
 		$this->default_condition = Configuration::get($this->name.'_condition');
+
+    	$this->country = Configuration::get($this->name.'_country');
+    	$id_country = Country::getIdByName((int)$this->id_lang, $this->country);
+    	if (!$id_country)
+      		die (Tools::displayError('Failed to find target country: '.$this->country));
+    	$this->target_country = new Country($id_country);
+    	if (!Validate::isLoadedObject($this->target_country))
+			die (Tools::displayError('Can\'t instantiate target country object '. $this->target_country));
+    	$this->default_tax = (float)Configuration::get($this->name.'_default_tax');
+    	$this->ignore_tax = Configuration::get($this->name.'_ignore_tax');
+    	$this->ignore_shipping = Configuration::get($this->name.'_ignore_shipping');
 	}
 
 	private function directory()
@@ -191,10 +213,10 @@ class GoogleBase extends Module
 		$category = new Category(intval($id_category), intval(Configuration::get($this->name.'_lang')));
 	
 		if (!Validate::isLoadedObject($category))
-			die (Tools::displayError());
+			die (Tools::displayError('Failed to load category id= '.$id_category));
   
 		if ($category->id == 1)
-			return htmlentities($path);
+			return $this->_xmlentities($path);
   
 		$pipe = ' > ';
   
@@ -286,10 +308,10 @@ class GoogleBase extends Module
 		 return ($string);
 	}
 	
-	private function _xmlElement($name, $value, $encoding = false)
+  	private function _xmlElement($name, $value, $encoding = false, $force_zero = false, $integer = false)
 	{
 		$element = '';
-		if (!empty($value)) {
+    if ((!empty($value) && !($integer && (int)$value==0)) || $force_zero) {
 			if ($encoding)
 				$value = $this->_xmlentities($value);
 			$element .= "<".$name.">".$value."</".$name.">\n";
@@ -339,20 +361,298 @@ class GoogleBase extends Module
 		// 3. Unique Product Identifiers
 		if ($product['manufacturer_name'])
 			$item_data .= $this->_xmlElement('g:brand',$product['manufacturer_name'], true);
-		if ($this->gtin_field == 'ean13')
-			$item_data .= $this->_xmlElement('g:gtin', sprintf('%1$013d',$product['ean13']));
-		else if ($this->gtin_field == 'upc')
-			$item_data .= $this->_xmlElement('g:gtin',sprintf('%1$012d',$product['upc']));
+    	// gtin field
+    	$item_data .= $this->_xmlElement('g:gtin', $this->_getGtinValue($product), false, false, true);
+
 		if ($this->use_supplier)
 			$item_data .= $this->_xmlElement('g:mpn',$product['supplier_reference']);
 		
+    	// 6. Tax & Shipping
+    	if ($this->country == 'United States' && $this->_compat > 13 && !$this->ignore_tax)
+      		$item_data .= $this->_xmlTaxGroups($product);
+
+    	if (!$this->ignore_shipping && $this->_compat > 13)
+      		$item_data .= $this->_xmlShippingGroups($product);
+
+   		$item_data .= $this->_xmlElement('g:shipping_weight',$product['weight'] ? $product['weight'].' '.Configuration::get('PS_WEIGHT_UNIT') : 0);
+
 		// 7. Nearby Stores (US & UK only)
-		if ($this->nearby and $this->_compat > 13)
+    	if (($this->country == 'United States' || $this->country == 'United Kingdom') && $this->_compat > 13)
 			$item_data .= $this->_xmlElement('g:online_only',$product['online_only'] == 1 ? 'y' : 'n');
 		
 		return $item_data;
 	}
 	
+	private function _xmlTaxGroups($id_product)
+	{
+		  $states = array();
+		  $counties = array();
+		  $tax_groups = '';
+		  
+		  // Only 1.4+ supported at present
+		  if ((int)$this->_compat < 14) return '';
+		  
+		  if (Country::containsStates($this->target_country->id)) {
+			  // Country default
+			  $tax_groups .= $this->_xmlTaxGroup((int)$id_product);
+			  $states = State::getStatesByIdCountry($this->target_country->id);
+		  
+			  foreach ($states AS $state) {
+				  // State default
+				  $tax_groups .= $this->_xmlTaxGroup((int)$id_product, $state);
+				  if (State::hasCounties($state['id_state'])) {
+					  $counties = County::getCounties($state['id_state']);
+					  foreach ($counties AS $county)
+					  {
+						// County specific
+						$tax_groups .= $this->_xmlTaxGroup((int)$id_product, $state, $county);
+					  }
+				  }
+			  }
+		  } else {
+			  $tax_groups .= $this->_xmlTaxGroup((int)$id_product);
+		  }
+		  
+		  return $tax_groups;
+	}
+  
+	private function _xmlTaxGroup($id_product, $state = NULL, $county = NULL)
+	{
+		  $group = "<g:tax>\n";
+		  $group .= $this->_xmlElement('g:country', $this->target_country->iso_code);
+		  if (is_array($state) && isset($state['iso_code']) && isset($state['id_state'])) {
+			  if (is_array($county) && isset($county['name']) && isset($county['id_county']))
+				  $group .= $this->_xmlElement('g:region', $county['name']);
+			  else
+				   $group .= $this->_xmlElement('g:region', $state['iso_code']);
+		  }
+		  $rate = Tax::getProductTaxRateViaRules((int)$id_product, (int)$this->target_country->id,
+												  (int)isset($state['id_state']) ? $state['id_state'] : 0 ,
+												  (int)isset($county['id_county']) ? $county['id_county'] : 0);
+		  $group .= $this->_xmlElement('g:rate', $rate);
+		  $group .= "</g:tax>\n";
+		  
+		  // Omit tax group if it matches the Merchant Center default
+		  if ((float)$this->default_tax && ($rate == $this->default_tax))
+			   $group = '';
+		  return $group;
+	  }
+  
+	private function _xmlShippingGroups($product)
+	{
+		$states = array();
+		$shipping_groups = '';
+		
+		// Only 1.4+ supported at present
+		if ((int)$this->_compat < 14) return '';
+		
+		if (Country::containsStates($this->target_country->id)) {
+			// Country default
+			$shipping_groups .= $this->_xmlShippingCarriers($product);
+			$states = State::getStatesByIdCountry($this->target_country->id);
+		   
+			 foreach ($states AS $state) {
+				 // State specific
+				$shipping_groups .= $this->_xmlShippingCarriers($product, $state);
+			 }
+		} else {
+			$shipping_groups .= $this->_xmlShippingCarriers($product);
+		}
+		
+		return $shipping_groups;
+	}
+  
+	private static $cacheZoneCarriers = array();
+	private function _zoneCarriers($id_zone)
+	{
+		$carrier_objects = array();
+	
+		if (!isset(self::$cacheZoneCarriers[$id_zone])) {
+			$carriers = Carrier::getCarriers($this->id_lang, true, false, $id_zone, NULL, 5);
+			foreach ($carriers as $k => $row) {
+				$carrier = new Carrier((int)$row['id_carrier'], $this->id_lang);
+				$shippingMethod = $carrier->getShippingMethod();
+				if ($shippingMethod != Carrier::SHIPPING_METHOD_FREE) {
+					// Get only carriers that are compliant with shipping method
+					if (($shippingMethod == Carrier::SHIPPING_METHOD_WEIGHT AND $carrier->getMaxDeliveryPriceByWeight($id_zone) === false)
+					OR ($shippingMethod == Carrier::SHIPPING_METHOD_PRICE AND $carrier->getMaxDeliveryPriceByPrice($id_zone) === false)) {
+						unset($carriers[$k]);
+						continue ;
+					}
+				}
+				$carrier_objects[] = $carrier;
+			}
+			self::$cacheZoneCarriers[$id_zone] = $carrier_objects;
+		}
+		return self::$cacheZoneCarriers[$id_zone];
+	}
+  
+	private function _xmlShippingCarriers($product, $state = NULL)
+	{
+		$groups = '';
+	
+		if ($state) {
+			// Only generate state-specific shipping if it is different from the target country zone
+			if ($state['id_zone'] !== $this->target_country->id_zone)
+			  $id_zone = $state['id_zone'];
+			else
+			  return '';
+		}
+		else
+			$id_zone = $this->target_country->id_zone;
+	
+		$carriers = $this->_zoneCarriers($id_zone);
+		if (!$carriers)
+			die (Tools::displayError('Failed to find any valid Carriers for '.$this->country. ' Zone = '.$id_zone));
+	
+		foreach ($carriers AS $carrier) {
+			$groups .= $this->_xmlShippingGroup($product, $carrier, $id_zone, $state);
+		}
+		return $groups;
+	}
+  
+	private function _xmlShippingGroup($product, $carrier, $id_zone, $state = NULL)
+	{
+		if (!Validate::isLoadedObject($carrier)) {
+			die(Tools::displayError('Fatal error: "no default carrier"'));
+		}
+		
+		$group = "<g:shipping>\n";
+		$group .= $this->_xmlElement('g:country', $this->target_country->iso_code);
+		if (is_array($state) && isset($state['iso_code']) && isset($state['id_state'])) {
+			$group .= $this->_xmlElement('g:region', $state['iso_code']);
+		}
+		$price = $this->getProductShippingCost($product, $carrier, $id_zone); // Calculate price
+		if ($price === false)
+			return '';
+		$group .= $this->_xmlElement('g:service', $carrier->delay); // Service class or delivery speed
+		$group .= $this->_xmlElement('g:price', $price, false, true); // 0 could be valid for free shipping
+	
+		$group .= "</g:shipping>\n";
+	
+		return $group;
+	}
+  
+	private function getProductShippingCost($product, $carrier, $id_zone, $useTax = true)
+	{
+		// Order total in default currency without fees
+		$order_total = $product['price'];
+
+		// Start with shipping cost at 0
+		$shipping_cost = 0;
+
+		if (!Validate::isLoadedObject($carrier)) {
+			die(Tools::displayError('Fatal error: "no default carrier"'));
+		}
+		if (!$carrier->active)
+			return $shipping_cost;
+
+		// Free fees if free carrier
+		if ($carrier->is_free == 1)
+			return 0;
+
+		// Select carrier tax
+		if ($useTax AND !Tax::excludeTaxeOption())
+			 $carrierTax = Tax::getCarrierTaxRate((int)$carrier->id);
+
+		$configuration = Configuration::getMultiple(array('PS_SHIPPING_FREE_PRICE', 'PS_SHIPPING_HANDLING', 'PS_SHIPPING_METHOD', 'PS_SHIPPING_FREE_WEIGHT'));
+		// Free fees
+		$free_fees_price = 0;
+		if (isset($configuration['PS_SHIPPING_FREE_PRICE']))
+			$free_fees_price = Tools::convertPrice((float)($configuration['PS_SHIPPING_FREE_PRICE']), Currency::getCurrencyInstance((int)($this->id_currency)));
+
+		if ($order_total >= (float)($free_fees_price) AND (float)($free_fees_price) > 0)
+			return $shipping_cost;
+		if (isset($configuration['PS_SHIPPING_FREE_WEIGHT']) AND $product['weight'] >= (float)($configuration['PS_SHIPPING_FREE_WEIGHT']) AND (float)($configuration['PS_SHIPPING_FREE_WEIGHT']) > 0)
+			return $shipping_cost;
+
+		// Get shipping cost using correct method
+		if ($carrier->range_behavior) {
+			if (($carrier->getShippingMethod() == Carrier::SHIPPING_METHOD_WEIGHT AND (!Carrier::checkDeliveryPriceByWeight($carrier->id, $this->getTotalWeight(), $id_zone)))
+					OR ($carrier->getShippingMethod() == Carrier::SHIPPING_METHOD_PRICE AND (!Carrier::checkDeliveryPriceByPrice($carrier->id, $this->getOrderTotal(true, Cart::BOTH_WITHOUT_SHIPPING), $id_zone, (int)($this->id_currency)))))
+					$shipping_cost += 0;
+				else {
+						if ($carrier->getShippingMethod() == Carrier::SHIPPING_METHOD_WEIGHT)
+							$shipping_cost += $carrier->getDeliveryPriceByWeight($product['weight'], $id_zone);
+						else // by price
+							$shipping_cost += $carrier->getDeliveryPriceByPrice($order_total, $id_zone, (int)($this->id_currency));
+					 }
+		} else {
+			if ($carrier->getShippingMethod() == Carrier::SHIPPING_METHOD_WEIGHT)
+				$shipping_cost += $carrier->getDeliveryPriceByWeight($product['weight'], $id_zone);
+			else
+				$shipping_cost += $carrier->getDeliveryPriceByPrice($order_total, $id_zone, (int)($this->id_currency));
+
+		}
+		// Adding handling charges
+		if (isset($configuration['PS_SHIPPING_HANDLING']) AND $carrier->shipping_handling)
+			$shipping_cost += (float)($configuration['PS_SHIPPING_HANDLING']);
+
+		$shipping_cost = Tools::convertPrice($shipping_cost, Currency::getCurrencyInstance((int)($this->id_currency)));
+
+		// Additional Shipping Cost per product
+		$shipping_cost += $product['additional_shipping_cost'];
+
+		//get external shipping cost from module
+		if ($carrier->shipping_external)
+		{
+			$moduleName = $carrier->external_module_name;
+			$module = Module::getInstanceByName($moduleName);
+
+			if (Validate::isLoadedObject($module))
+			{
+				if (array_key_exists('id_carrier', $module))
+					$module->id_carrier = $carrier->id;
+				if ($carrier->need_range)
+					$shipping_cost = $module->getOrderShippingCost($this, $shipping_cost);
+				else
+					$shipping_cost = $module->getOrderShippingCostExternal($this);
+
+				// Check if carrier is available
+				if ($shipping_cost === false)
+					return false;
+			}
+			else
+				return false;
+		}
+
+		// Apply tax
+		if (isset($carrierTax))
+			$shipping_cost *= 1 + ($carrierTax / 100);
+
+		return number_format((float)($shipping_cost), 2, '.', '').' '.$this->currencies[$this->id_currency]->iso_code;
+	}
+  
+	private function _getGtinValue($product)
+	{
+		$gtin = '';
+	
+		switch ($this->gtin_field) {
+			case 'ean13':
+				$gtin = sprintf('%1$013d',$product['ean13']);
+			break;
+			case 'upc':
+				$gtin = sprintf('%1$012d',$product['upc']);
+			break;
+			case 'isbn10':
+				$gtin = sprintf('%1$010d',$product['ean13']);
+			break;
+			case 'isbn13':
+				$gtin = sprintf('%1$013d',$product['ean13']);
+			break;
+			case 'jan8':
+				$gtin = sprintf('%1$08d',$product['ean13']);
+			break;
+			case 'jan13':
+				$gtin = sprintf('%1$013d',$product['ean13']);
+			break;
+			case 'none':
+				$gtin = '';
+			break;
+		}
+		return $gtin;
+	}
+
 	private function _getCompatibleCondition($condition)
 	{
 		switch ($condition) {
@@ -369,16 +669,26 @@ class GoogleBase extends Module
 		return $condition;
 	}
 	
-	private function _getCompatiblePrice($id_product, $id_product_attrib = NULL)
+  private function _getCompatiblePrice($id_product, $id_product_attrib = NULL, $force_tax = false)
 	{
-		$price = number_format(Tools::convertPrice(Product::getPriceStatic(intval($id_product), true, $id_product_attrib, 6, NULL, false, false), $this->currencies[$this->id_currency]), 2, '.', '');
+    if ($this->country == 'United States' && !$force_tax)
+      $use_tax = false;
+    else
+      $use_tax = true;
+
+    $price = number_format(Tools::convertPrice(Product::getPriceStatic(intval($id_product), $use_tax, $id_product_attrib, 6, NULL, false, false), $this->currencies[$this->id_currency]), 2, '.', '');
 		
 		return $price.' '.$this->currencies[$this->id_currency]->iso_code;
 	}
 	
-	private function _getCompatibleSalePrice($id_product, $id_product_attrib = NULL)
+  private function _getCompatibleSalePrice($id_product, $id_product_attrib = NULL, $force_tax = false)
 	{
-		$price = number_format(Tools::convertPrice(Product::getPriceStatic(intval($id_product), true, $id_product_attrib, 6), $this->currencies[$this->id_currency]), 2, '.', '');
+    if ($this->country == 'United States' && !$force_tax)
+      $use_tax = false;
+    else
+      $use_tax = true;
+
+    $price = number_format(Tools::convertPrice(Product::getPriceStatic(intval($id_product), $use_tax, $id_product_attrib, 6), $this->currencies[$this->id_currency]), 2, '.', '');
 		
 		return $price.' '.$this->currencies[$this->id_currency]->iso_code;
 	}
@@ -481,6 +791,9 @@ class GoogleBase extends Module
 		$this->gtin_field = Tools::getValue('gtin', Configuration::get($this->name.'_gtin'));
 		$this->currency = Tools::getValue('currency', Configuration::get($this->name.'_currency'));
 		$this->id_lang = Tools::getValue('language', Configuration::get($this->name.'_lang'));
+    	$this->country = Tools::getValue('country', Configuration::get($this->name.'_country'));
+    	$this->ignore_tax = (int)(Tools::isSubmit('ignore_tax') ? 1 : Configuration::get($this->name.'_ignore_tax'));
+    	$this->ignore_shipping = (int)(Tools::isSubmit('ignore_shipping') ? 1 : Configuration::get($this->name.'_ignore_shipping'));
 	  
 		$this->_html .=
 				'<form action="'.$_SERVER['REQUEST_URI'].'" method="post">
@@ -495,7 +808,7 @@ class GoogleBase extends Module
 				$this->l('The following allow localisation of the feed for both language and currency, which can be selected independently.
 						 Remember to change the <strong>output location</strong> below if you want to generate and retain multiple feed files with different
 						 language and currency combinations. Note that after updating these settings a new recommended Output Location will be suggested below
-						 but <em>will not automatically be used</em>.').'</p>
+                     	but <em>will not automatically be used</em>. You should select the country you are targetting below to ensure regional differences are handled correctly.').'</p>
 						</fieldset>
 						<br />
 			  <label>'.$this->l('Currency').'</label>
@@ -517,6 +830,39 @@ class GoogleBase extends Module
 				$this->_html .='</select>
 				<p class="clear">'.$this->l('Store default ='). ' ' . $this->languages[$this->_cookie->id_lang]['name'].'</p>
 			  </div>
+          <label>'.$this->l('Target Country').'</label>
+          <div class="margin-form">
+            <select name="country" id="country" >
+            <option value="Australia"'.($this->country == 'Australia' ? ' selected="selected"' : '').' >Australia</option>
+            <option value="Brazil"'.($this->country == 'Brazil' ? ' selected="selected"' : '').' >Brazil</option>
+            <option value="Switzerland"'.($this->country == 'Switzerland' ? ' selected="selected"' : '').' >Switzerland</option>
+            <option value="China"'.($this->country == 'China' ? ' selected="selected"' : '').' >China</option>
+            <option value="Germany"'.($this->country == 'Germany' ? ' selected="selected"' : '').' >Germany</option>
+            <option value="Spain"'.($this->country == 'Spain' ? ' selected="selected"' : '').' >Spain</option>
+            <option value="France"'.($this->country == 'France' ? ' selected="selected"' : '').' >France</option>
+            <option value="United Kingdom"'.($this->country == 'United Kingdom' ? ' selected="selected"' : '').' >United Kingdom</option>
+            <option value="Italy"'.($this->country == 'Italy' ? ' selected="selected"' : '').' >Italy</option>
+            <option value="Japan"'.($this->country == 'Japan' ? ' selected="selected"' : '').' >Japan</option>
+            <option value="Netherlands"'.($this->country == 'Netherlands' ? ' selected="selected"' : '').' >Netherlands</option>
+            <option value="United States"'.($this->country == 'United States' ? ' selected="selected"' : '').' >United States</option>
+            </select>
+            <p class="clear">'.$this->l('For country-specific rules. Note that the language and currency settings should match.').'</p>
+          </div>
+          <label>'.$this->l('Default Tax: ').'</label>
+					<div class="margin-form">
+						<input name="default_tax" type="text" value="'.Tools::getValue('default_tax', Configuration::get($this->name.'_default_tax')).'"/>
+						<p class="clear">'.$this->l('<strong>US Only</strong>. Set this value to the percentage rate you defined in Merchant Center. Any tax group matching this rate will be omitted (reduces xml file size).').'</p>
+					</div>
+          <label>'.$this->l('Ignore Tax: ').'</label>
+					<div class="margin-form">
+						<input type="checkbox" name="ignore_tax" id="ignore_tax" value="1"' . ($this->ignore_tax ? 'checked="checked" ' : '') . ' />
+						<p class="clear">'.$this->l('<strong>US Only</strong>. When checked no tax group information will be generated.').'</p>
+					</div>
+          <label>'.$this->l('Ignore Shipping: ').'</label>
+					<div class="margin-form">
+						<input type="checkbox" name="ignore_shipping" id="ignore_shipping" value="1"' . ($this->ignore_shipping ? 'checked="checked" ' : '') . ' />
+						<p class="clear">'.$this->l('When checked no shipping information will be generated.').'</p>
+					</div>
 			  <fieldset class="space">
 							<p style="font-size: smaller;"><img src="../img/admin/unknown.gif" alt="" class="middle" />'.
 				$this->l('The minimum <em>required</em> configuration is to define a description for your feed. This should be text (not html),
@@ -527,7 +873,7 @@ class GoogleBase extends Module
 						<label>'.$this->l('Feed Description: ').'</label>
 						<div class="margin-form">
 							<textarea name="description" rows="5" cols="80" >'.Tools::getValue('description', Configuration::get($this->name.'_description')).'</textarea>
-							<p class="clear">'.$this->l('Example:').' Our range of fabulous products</p>
+						<p class="clear">'.$this->l('Example: Our range of fabulous products').'</p>
 						</div>
 						<label>'.$this->l('Output Location: ').'</label>
 						<div class="margin-form">
@@ -536,25 +882,48 @@ class GoogleBase extends Module
 						</div>
 			  <fieldset class="space">
 							<p style="font-size: smaller;"><img src="../img/admin/unknown.gif" alt="" class="middle" />'.
-				$this->l('Google have certain mandatory requirements for accepting feedfiles which vary between countries. As a minimum you should
-						 have valid entries in your product catalog for one or both of the following in addition to properly entering the manufacturer per product. Your
-						 product <strong>will be rejected</strong> if you do not have valid data for The "Unique Product Identifier" setting chosen below <strong>plus</strong>
-						 either a valid manufacturer assigned to your products <strong>AND/OR</strong> the "Supplier Reference" enabled and populated for your products.').'</p>
+            $this->l('Unique product identifiers such as UPC, EAN, JAN or ISBN allow Google to show your listing on the appropriate product page. If you don\'t provide
+                     the required unique product identifiers, your store may not appear on product pages and all your items may be removed from Product Search.<br /><br />').
+            $this->l('Google require unique product identifiers for all products - except for custom made goods. For clothing, you must submit the \'brand\' attribute.
+                     For media (such as books, movies, music and video games), you must submit the \'gtin\' attribute. In all cases, they recommend that you submit
+                     all three attributes.<br /><br />').
+            $this->l('You need to submit at least two attributes of \'brand\', \'gtin\' and \'mpn\', but Google recommend that you submit all three if available. For media
+                     (such as books, films, music and video games), you must submit the \'gtin\' attribute, but they recommend that you include \'brand\' and \'mpn\' if
+                     available.').
+            '</p>
 						</fieldset>
 						<br />
 			  <label>'.$this->l('Use Supplier Reference').'</label>
 			  <div class="margin-form">
 				<input type="checkbox" name="use_supplier" id="use_supplier" value="1"' . ($this->use_supplier ? 'checked="checked" ' : '') . ' />
-				<p class="clear">'.$this->l('Use the supplier reference field as Manufacturers Part Number (MPN)').'</p>
+            <p class="clear">'.$this->l('Use the supplier reference field as Manufacturers Part Number (MPN). This code uniquely identifies the product to its
+                                        manufacturer. In particular, the combination of brand and MPN clearly specifies one product. Required for all items -
+                                        except clothing, media, and custom made goods or if you\'re providing \'brand\' and \'gtin\'.').'</p>
 			  </div>
-			  <label>'.$this->l('Unique Product Identifier').'</label>
+          <label>'.$this->l('Global Trade Item Numbers').'</label>
 			  <div class="margin-form">
 				<input type="radio" name="gtin" id="gtin_0" value="ean13" '.($this->gtin_field == 'ean13' ? 'checked="checked" ' : '').' > EAN13</option>
 				<input type="radio" name="gtin" id="gtin_1" value="upc" '.($this->gtin_field == 'upc' ? 'checked="checked" ' : '').' > UPC</option>
-				<input type="radio" name="gtin" id="gtin_2" value="none" '.($this->gtin_field == 'none' ? 'checked="checked" ' : '').' > None</option>
-				<p class="clear">'.$this->l('Mandatory unless you specify the Manufacturer and MPN (see above). Either: EAN13 (EU) or UPC (US)').'</p>
+            <input type="radio" name="gtin" id="gtin_2" value="isbn10" '.($this->gtin_field == 'isbn10' ? 'checked="checked" ' : '').' > ISBN-10</option>
+            <input type="radio" name="gtin" id="gtin_3" value="isbn13" '.($this->gtin_field == 'isbn13' ? 'checked="checked" ' : '').' > ISBN-13</option>
+            <input type="radio" name="gtin" id="gtin_4" value="jan8" '.($this->gtin_field == 'jan8' ? 'checked="checked" ' : '').' > JAN (8-digit)</option>
+            <input type="radio" name="gtin" id="gtin_5" value="jan13" '.($this->gtin_field == 'jan13' ? 'checked="checked" ' : '').' > JAN (13-digit)</option>
+            <input type="radio" name="gtin" id="gtin_6" value="none" '.($this->gtin_field == 'none' ? 'checked="checked" ' : '').' > None</option>
+            <p class="clear">'.$this->l('Choose the identifier most suitable for your region and/or products. These identifiers are UPC (in North America),
+                                        EAN (in Europe), JAN (in Japan) and ISBN (for books). JAN and ISBN numbers should be entered in the
+                                        Prestashop EAN field. You can include any of these values within this attribute:').'</p>
+            <ul>
+            <li>'.$this->l('UPC: 12-digit number such as 001234567891').'</li>
+            <li>'.$this->l('EAN: 13-digit number such as 1001234567891').'</li>
+            <li>'.$this->l('JAN: 8 or 13-digit number such as 12345678 or 1234567890123').'</li>
+            <li>'.$this->l('ISBN: 10 or 13-digit number such as 0451524233. If you have both, only include 13-digit number.').'</li>
+            </ul>
+            <p class="clear">'.$this->l('Required for all items - except for clothing and custom made goods, or if you\'re providing \'brand\' and \'mpn\'.').'</p>
 			  </div>
-			  <input name="btnUpdate" id="btnUpdate" class="button" value="'.((!file_exists($this->winFixFilename(Configuration::get($this->name.'_filepath')))) ? $this->l('Update Settings') : $this->l('Update Settings')).'" type="submit" />
+          <p style="font-size: smaller;"><img src="../img/admin/unknown.gif" alt="" class="middle" />'.
+            $this->l('<strong>Remember to click below to save any changes made before running the feed.</strong>').
+            '</p>
+          <input name="btnUpdate" id="btnUpdate" class="button" value="'.$this->l('Update Settings').'" type="submit" />
 					</fieldset>
 				</form><br/>';
 	}
@@ -600,6 +969,11 @@ class GoogleBase extends Module
 				Configuration::updateValue($this->name.'_use_supplier', (int)(Tools::isSubmit('use_supplier')));
 				Configuration::updateValue($this->name.'_currency', (int)Tools::getValue('currency')); // Feed currency
 				Configuration::updateValue($this->name.'_lang', (int)Tools::getValue('language'));	// language to generate feed for
+        Configuration::updateValue($this->name.'_country', Tools::getValue('country'));
+        // A little fix just in case the % sign gets added....
+        Configuration::updateValue($this->name.'_default_tax', str_replace('%','',Tools::getValue('default_tax')));
+        Configuration::updateValue($this->name.'_ignore_tax', (int)(Tools::isSubmit('ignore_tax')));
+        Configuration::updateValue($this->name.'_ignore_shipping', (int)(Tools::isSubmit('ignore_shipping')));
   
 				$this->_getGlobals();
 			} else {
