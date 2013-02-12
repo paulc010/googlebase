@@ -655,7 +655,7 @@ class GoogleBase extends Module
 		return $this->_html;
 	}
 	
-	private function	_displayWarnings($warn)
+	private function _displayWarnings($warn)
 	{
 		$str_output = '';
 		if (!empty($warn)) {
@@ -734,11 +734,11 @@ class GoogleBase extends Module
 	{
 		// TODO: Need to check on actual variant availability
 		if ($product["quantity"]> 0)
-      return $this->l('in stock');
-    else if ( self::checkQty($product,1))
-      return $this->l('available for order');
-    else
-      return $this->l('out of stock');
+      		return $this->l('in stock');
+    	else if ( self::checkQty($product,1))
+      		return $this->l('available for order');
+    	else
+      		return $this->l('out of stock');
 	}
 	
 	public function getCurrencies($object = true, $active = 1)
