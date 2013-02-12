@@ -7,7 +7,6 @@ class GoogleBase extends Module
 {
 	private $_html = '';
 	private $_postErrors = array();
-	private $_cookie;
 	private $_compat;
 	private $_warnings;
 	private $_mod_errors;
@@ -32,36 +31,20 @@ class GoogleBase extends Module
 		$this->_mod_errors = array();
 		
 		$this->name = 'googlebase';
-		$this->tab = $this->_compat > 13 ? 'advertising_marketing' : 'Tools';
-		if ($this->_compat > 13)
-			$this->author = 'eCartService.net';
+		$this->tab = 'advertising_marketing';
+		$this->author = 'eCartService.net';
 		$this->version = '0.9';
 		$this->need_instance = 0;
 		
 		parent::__construct();
 		
-		if ($this->_compat < 15) {
-			global $cookie;
-			$this->_cookie = $cookie;
-		} else {
-			$this->_cookie = $this->context->cookie;
-		}
-		
 		// Set default config values if they don't already exist (here for compatibility in case the user doesn't uninstall/install at upgrade)
 		// Also set global "macro" data for the feed and check for store configuration changes
-		if ($this->isInstalled($this->name))
-		{
-			// deprecated
-			if (Configuration::get($this->name.'_domain'))
-				Configuration::deleteByName($this->name.'_domain');
-			// deprecated
-			if (Configuration::get($this->name.'_psdir'))
-				Configuration::deleteByName($this->name.'_psdir');
-			
+		if ($this->isInstalled($this->name)) {
 			$this->_setDefaults();
 		}
 
-		$this->displayName = $this->l('[BETA]Google Base Feed Products');
+		$this->displayName = $this->l('[BETA]Google Base Feed Products (Prestashop 1.5.3+ only)');
 		$this->description = $this->l('Generate your products feed for Google Products Search. www.ecartservice.net');
 	}
 
@@ -76,7 +59,7 @@ class GoogleBase extends Module
 		if (!Configuration::get($this->name.'_description'))
 			Configuration::updateValue($this->name.'_description', '****Type some text to describe your shop before generating your first feed****');
 		if (!Configuration::get($this->name.'_lang'))
-			Configuration::updateValue($this->name.'_lang', $this->_cookie->id_lang);
+			Configuration::updateValue($this->name.'_lang', $this->context->cookie->id_lang);
 		if (!Configuration::get($this->name.'_gtin'))
 			Configuration::updateValue($this->name.'_gtin', 'ean13');
 		if (!Configuration::get($this->name.'_use_supplier'))
@@ -104,8 +87,8 @@ class GoogleBase extends Module
 		$this->lang_iso = strtolower(Language::getIsoById($this->id_lang));
 		if (!isset($this->languages[$this->id_lang]))
 		{
-			Configuration::updateValue($this->name.'_lang', (int)$this->_cookie->id_lang);
-			$this->id_lang = (int)$this->_cookie->id_lang;
+			Configuration::updateValue($this->name.'_lang', (int)$this->context->cookie->id_lang);
+			$this->id_lang = (int)$this->context->cookie->id_lang;
 			$this->lang_iso = strtolower(Language::getIsoById($this->id_lang));
 			$this->warnings[] = $this->l('Language configuration is invalid - reset to default.');
 		}
@@ -198,11 +181,8 @@ class GoogleBase extends Module
   
 		$pipe = ' > ';
   
-		if ($this->_compat < 15) {
-			$category_name = Category::hideCategoryPosition($category->name);
-		} else {
-			$category_name = preg_replace('/^[0-9]+\./', '', $category->name);
-		}
+		// Fix for legacy ordering via numeric prefix
+		$category_name = preg_replace('/^[0-9]+\./', '', $category->name);
   
 		if ($path != $category_name)
 			$path = $category_name.($path!='' ? $pipe.$path : '');
@@ -353,10 +333,7 @@ class GoogleBase extends Module
 		if ($image_links[1]['valid'] == 1)
 			$item_data .= $this->_xmlElement('g:additional_image_link',$image_links[1]['link'], true);
 		
-		if ((int)$this->_compat > 13)
-			$item_data .= $this->_xmlElement('g:condition', $this->_getCompatibleCondition($product['condition']));
-		else
-			$item_data .= $this->_xmlElement('g:condition',$this->_getCompatibleCondition($this->default_condition));
+		$item_data .= $this->_xmlElement('g:condition', $this->_getCompatibleCondition($product['condition']));
 		
 		// 2. Availability & Price
 		$item_data .= $this->_xmlElement('g:availability',$this->getAvailability($product, $id_product_attribute));
@@ -379,22 +356,16 @@ class GoogleBase extends Module
 		// gtin value
 		$item_data .= $this->_xmlElement('g:gtin', $this->_getGtinValue($product, $variant));
 		
-		if ($this->_compat < 15) {
-			if ($this->use_supplier && !empty($product['supplier_reference']));
-				$item_data .= $this->_xmlElement('g:mpn',$product['supplier_reference']);
-		} else {
-			if (isset($product['id_supplier']) && !empty($product['id_supplier']) || (is_object($variant) && !empty($variant->supplier_reference))) {
-				if (!is_object($variant)) {
-					$item_data .= $this->_xmlElement('g:mpn',ProductSupplier::getProductSupplierReference($product['id_product'], 0, $product['id_supplier']));
-				} else {
-					$item_data .= $this->_xmlElement('g:mpn', $variant->supplier_reference);
-				}
+		if (isset($product['id_supplier']) && !empty($product['id_supplier']) || (is_object($variant) && !empty($variant->supplier_reference))) {
+			if (!is_object($variant)) {
+				$item_data .= $this->_xmlElement('g:mpn',ProductSupplier::getProductSupplierReference($product['id_product'], 0, $product['id_supplier']));
+			} else {
+				$item_data .= $this->_xmlElement('g:mpn', $variant->supplier_reference);
 			}
 		}
-		
 			
 		// 7. Nearby Stores (US & UK only)
-		if ($this->nearby and $this->_compat > 13)
+		if ($this->nearby)
 			$item_data .= $this->_xmlElement('g:online_only',$product['online_only'] == 1 ? 'y' : 'n');
 		
 		return $item_data;
@@ -462,82 +433,24 @@ class GoogleBase extends Module
 	
 	private function _getCompatibleImageLinks($product)
 	{
-		if ($this->_compat > 14) {
-			$link = $this->context->link;
-		} else {
-			$link = new Link();
-		}
 		$image_data = array(array('link' => '', 'valid' => 0), array('link' => '', 'valid' => 0));
 		$images = Image::getImages($this->id_lang, $product['id_product']);
 		
-		switch ($this->_compat) {
-			case '11':
-				if (isset($images[0])) {
-					$image_data[0]['link'] = 'http://'.$_SERVER['HTTP_HOST'].$this->psdir.'img/p/'.$images[0]['id_product'].'-'.$images[0]['id_image'].'-large.jpg';
-					$image_data[0]['valid'] = 1;
-				}
-				if (isset($images[1])) {
-					$image_data[1]['link'] = 'http://'.$_SERVER['HTTP_HOST'].$this->psdir.'img/p/'.$images[1]['id_product'].'-'.$images[1]['id_image'].'-large.jpg';
-					$image_data[1]['valid'] = 1;
-				}
-			break;
-		  
-			case '15':
-			case '14':
-				if (isset($images[0])) {
-					$image_data[0]['link'] = $link->getImageLink($product['link_rewrite'], (int)$product['id_product'].'-'.(int)$images[0]['id_image']);
-					$image_data[0]['valid'] = 1;
-				}
-				if (isset($images[1])) {
-					$image_data[1]['link'] = $link->getImageLink($product['link_rewrite'], (int)$product['id_product'].'-'.(int)$images[1]['id_image']);
-					$image_data[1]['valid'] = 1;
-				}
-			break;
-		  
-			default:
-				if (isset($images[0])) {
-					$image_data[0]['link'] = 'http://'.$_SERVER['HTTP_HOST'].$this->psdir.$link->getImageLink($product['link_rewrite'], (int)$product['id_product'].'-'.(int)$images[0]['id_image']);
-					$image_data[0]['valid'] = 1;
-				}
-				if (isset($images[1])) {
-					$image_data[1]['link'] = 'http://'.$_SERVER['HTTP_HOST'].$this->psdir.$link->getImageLink($product['link_rewrite'], (int)$product['id_product'].'-'.(int)$images[1]['id_image']);;
-					$image_data[1]['valid'] = 1;
-				}
-			break;
-		
+		if (isset($images[0])) {
+			$image_data[0]['link'] = $this->context->link->getImageLink($product['link_rewrite'], (int)$product['id_product'].'-'.(int)$images[0]['id_image']);
+			$image_data[0]['valid'] = 1;
 		}
+		if (isset($images[1])) {
+			$image_data[1]['link'] = $this->context->link->getImageLink($product['link_rewrite'], (int)$product['id_product'].'-'.(int)$images[1]['id_image']);
+			$image_data[1]['valid'] = 1;
+		}
+
 		return $image_data;
 	}
 	
 	private function _getCompatibleProductLink($product, $variant = null)
 	{
-		if ($this->_compat > 14) {
-			$link = $this->context->link;
-		} else {
-			$link = new Link();
-		}
-		switch ($this->_compat) {
-			case '11':
-				$product_link = $link->getProductLink($product['id_product'], $product['link_rewrite']);
-				// Make 1.1 result look like 1.2+
-				if (strpos( $product_link, 'http://' ) === false )
-					$product_link = 'http://'.$_SERVER['HTTP_HOST'].$product_link;
-			break;
-		  
-			case '12':
-				$product_link = $link->getProductLink((int)($product['id_product']), $product['link_rewrite'], $this->_getrawCatRewrite($product['id_category_default']), $product['ean13']);
-			break;
-		
-			case '13':
-				$product_link = $link->getProductLink((int)($product['id_product']), $product['link_rewrite'], $this->_getrawCatRewrite($product['id_category_default']), $product['ean13'], (int)$this->id_lang);
-			break;
-		
-			default:
-				$product_link = $link->getProductLink($product, null, null, null, (int)$this->id_lang);
-			break;
-		}
-		
-		return $product_link;
+		return $this->context->link->getProductLink($product, null, null, null, (int)$this->id_lang);
 	}
 	
 	private function _displayFeed()
@@ -600,7 +513,7 @@ class GoogleBase extends Module
 					$this->_html .= '<option value="'.$language['id_lang'].'"'.($this->id_lang == $language['id_lang'] ? ' selected="selected"' : '').' > '.$language['name'].' </option>';
 				}
 				$this->_html .='</select>
-				<p class="clear">'.$this->l('Store default ='). ' ' . $this->languages[$this->_cookie->id_lang]['name'].'</p>
+				<p class="clear">'.$this->l('Store default ='). ' ' . $this->languages[$this->context->cookie->id_lang]['name'].'</p>
 			  </div>
 			  <fieldset class="space">
 							<p style="font-size: smaller;"><img src="../img/admin/unknown.gif" alt="" class="middle" />'.
@@ -791,27 +704,18 @@ class GoogleBase extends Module
 	
 	public function getCurrencies($object = true, $active = 1)
 	{
-		switch ($this->_compat) {
-			case '14':
-				$tab = Db::getInstance()->ExecuteS('
-							SELECT *
-							FROM `'._DB_PREFIX_.'currency`
-							WHERE `deleted` = 0
-							'.($active == 1 ? 'AND `active` = 1' : '').'
-							ORDER BY `name` ASC');
-			break;
-			default:
-				$tab = Db::getInstance()->ExecuteS('
-							SELECT *
-							FROM `'._DB_PREFIX_.'currency`
-							WHERE `deleted` = 0
-							ORDER BY `name` ASC');
-			break;
-		}
+		
+		$tab = Db::getInstance()->ExecuteS('
+					SELECT *
+					FROM `'._DB_PREFIX_.'currency`
+					WHERE `deleted` = 0
+					'.($active == 1 ? 'AND `active` = 1' : '').'
+					ORDER BY `name` ASC');
   
 		if ($object)
 			foreach ($tab as $key => $currency)
 				$tab[$currency['id_currency']] = Currency::getCurrencyInstance($currency['id_currency']);
+				
 		return $tab;
 	}
 	

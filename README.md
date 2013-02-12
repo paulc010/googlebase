@@ -1,7 +1,7 @@
 googlebase
 ========
 
-Google product search for Prestashop (to version 1.5.3.1)
+Google product search for Prestashop. This version is targetted at version 1.5.3.1
 
 Usage
 -------
@@ -9,13 +9,13 @@ Usage
 Upload the "googlebase" folder and its contents into your modules directory to use. The feed is generated from within the "Configure" panel of the module. It is located in
 the "Advertising & Marketing" section of the Modules list in the Backoffice.
 
-Known Major Issues
-----------------------
-
-Apparel and some other product types really need to be able to list the variants as unique items in the feed. This is not currently supported.
-
 CHANGELOG
 -------------
+12/02/2013
+-------------
+
+- Added support for "Variants"
+- Removed support for Prestashop versions prior to 1.5.1
 
 11/02/2013
 -------------
