@@ -23,6 +23,7 @@ CHANGELOG
 - Unchecking "Use Supplier Reference" enables the use of "Reference" instead for MPN (https://github.com/paulc010/googlebase/issues/1)
   NOTE: This may behave unpredictably for products with "Combinations"
 - Bug fixes to warnings variable
+- Change price calculation to reflect default customer group tax settings (include/exclude tax setting)
 
 11/02/2013
 -------------
