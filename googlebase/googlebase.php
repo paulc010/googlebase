@@ -402,14 +402,26 @@ class GoogleBase extends Module
 	
 	private function _getCompatiblePrice($id_product, $id_product_attrib = NULL)
 	{
-		$price = number_format(Tools::convertPrice(Product::getPriceStatic(intval($id_product), true, $id_product_attrib, 6, NULL, false, false), $this->currencies[$this->id_currency]), 2, '.', '');
+		$taxCalculationMethod = Group::getPriceDisplayMethod(Group::getCurrent()->id);
+		if ($taxCalculationMethod == PS_TAX_EXC) {
+			$use_tax = false;
+		} else {
+			$use_tax = true;
+		}
+		$price = number_format(Tools::convertPrice(Product::getPriceStatic(intval($id_product), $use_tax, $id_product_attrib, 6, NULL, false, false), $this->currencies[$this->id_currency]), 2, '.', '');
 		
 		return $price.' '.$this->currencies[$this->id_currency]->iso_code;
 	}
 	
 	private function _getCompatibleSalePrice($id_product, $id_product_attrib = NULL)
 	{
-		$price = number_format(Tools::convertPrice(Product::getPriceStatic(intval($id_product), true, $id_product_attrib, 6), $this->currencies[$this->id_currency]), 2, '.', '');
+		$taxCalculationMethod = Group::getPriceDisplayMethod(Group::getCurrent()->id);
+		if ($taxCalculationMethod == PS_TAX_EXC) {
+			$use_tax = false;
+		} else {
+			$use_tax = true;
+		}
+		$price = number_format(Tools::convertPrice(Product::getPriceStatic(intval($id_product), $use_tax, $id_product_attrib, 6), $this->currencies[$this->id_currency]), 2, '.', '');
 		
 		return $price.' '.$this->currencies[$this->id_currency]->iso_code;
 	}
