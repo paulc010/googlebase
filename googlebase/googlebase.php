@@ -12,7 +12,6 @@ class GoogleBase extends Module
 	private $_mod_errors;
 	
 	private $xml_description;
-	private $psdir;
 	private $id_lang;
 	private $languages;
 	private $lang_iso;
@@ -20,7 +19,7 @@ class GoogleBase extends Module
 	private $currencies;
 	private $gtin_field;
 	private $use_supplier;
-	private $nearby;
+	private $nearby; // Not supported yet. Needs config option
 
 	public function __construct()
 	{
@@ -41,6 +40,16 @@ class GoogleBase extends Module
 		// Set default config values if they don't already exist (here for compatibility in case the user doesn't uninstall/install at upgrade)
 		// Also set global "macro" data for the feed and check for store configuration changes
 		if ($this->isInstalled($this->name)) {
+			
+			// Cleanup old configuration values that are deprecated
+			if (Configuration::get($this->name.'_condition'))
+				Configuration::deleteByName($this->name.'_condition');
+			if (Configuration::get($this->name.'_domain'))
+				Configuration::deleteByName($this->name.'_domain');
+			if (Configuration::get($this->name.'_psdir'))
+				Configuration::deleteByName($this->name.'_psdir');
+				
+			// Set up meaningful defaults
 			$this->_setDefaults();
 		}
 
@@ -66,21 +75,19 @@ class GoogleBase extends Module
 			Configuration::updateValue($this->name.'_use_supplier', 1);
 		if (!Configuration::get($this->name.'_currency'))
 			Configuration::updateValue($this->name.'_currency', (int)Configuration::get('PS_CURRENCY_DEFAULT'));
-		if (!Configuration::get($this->name.'_condition'))
-			Configuration::updateValue($this->name.'_condition', 'new');
-	
+		
 		$this->_getGlobals();
 	
 		if (!Configuration::get($this->name.'_filepath'))
 			Configuration::updateValue($this->name.'_filepath', addslashes($this->defaultOutputFile()));
 	
+		// TODO: Needs config option to turn on/off. Currently off.
 		$this->_nearby = false;
 	}
 
 	private function _getGlobals()
 	{
 		$this->xml_description = Configuration::get($this->name.'_description');
-		$this->psdir = __PS_BASE_URI__;
 	  
 		$this->languages = $this->getLanguages();
 		$this->id_lang = intval(Configuration::get($this->name.'_lang'));
@@ -90,7 +97,7 @@ class GoogleBase extends Module
 			Configuration::updateValue($this->name.'_lang', (int)$this->context->cookie->id_lang);
 			$this->id_lang = (int)$this->context->cookie->id_lang;
 			$this->lang_iso = strtolower(Language::getIsoById($this->id_lang));
-			$this->warnings[] = $this->l('Language configuration is invalid - reset to default.');
+			$this->_warnings[] = $this->l('Language configuration is invalid - reset to default.');
 		}
 	  
 		$this->gtin_field = Configuration::get($this->name.'_gtin');
@@ -103,10 +110,9 @@ class GoogleBase extends Module
 		{
 			Configuration::updateValue($this->name.'_currency', (int)Configuration::get('PS_CURRENCY_DEFAULT'));
 			$this->id_currency = (int)Configuration::get('PS_CURRENCY_DEFAULT');
-			$this->warnings[] = $this->l('Currency configuration is invalid - reset to default.');
+			$this->_warnings[] = $this->l('Currency configuration is invalid - reset to default.');
 		}
 	  
-		$this->default_condition = Configuration::get($this->name.'_condition');
 	}
 
 	private function directory()
@@ -134,7 +140,6 @@ class GoogleBase extends Module
 		$output_file = $output_dir.$dir_separator.$this->lang_iso.'_'.strtolower($this->currencies[$this->id_currency]->iso_code).'_googlebase.xml';
 		return $output_file;
 	}
-
 
 	static private $cacheCat = array();
 	private function _getrawCatRewrite($id_cat)

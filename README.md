@@ -15,7 +15,7 @@ CHANGELOG
 -------------
 
 - Added support for "Variants"
-- Removed support for Prestashop versions prior to 1.5.1
+- Removed support for Prestashop versions prior to 1.5.3
 
 11/02/2013
 -------------
