@@ -249,7 +249,11 @@ class GoogleBase extends Module
 		}
 	}
 	
-	private function _postProcess()
+	public function do_crontask() {
+		$this->_postProcess(true);
+	}
+	
+	private function _postProcess($cron = false)
 	{
 		$products = Product::getProducts($this->id_lang, 0, NULL, 'id_product', 'ASC');
   
@@ -280,11 +284,13 @@ class GoogleBase extends Module
 			$this->_addToFeed( "$items</channel>\n</rss>\n" );
 		}
   
-		$res = file_exists($this->winFixFilename(Configuration::get($this->name.'_filepath')));
-		if ($res)
-			$this->_html .= '<h3 class="conf confirm" style="margin-bottom: 20px">'.$this->l('Feed file successfully generated').'</h3>';
-		else
-			$this->_mod_errors[] = $this->l('Error while creating feed file');
+		if (!$cron) {
+			$res = file_exists($this->winFixFilename(Configuration::get($this->name.'_filepath')));
+			if ($res)
+				$this->_html .= '<h3 class="conf confirm" style="margin-bottom: 20px">'.$this->l('Feed file successfully generated').'</h3>';
+			else
+				$this->_mod_errors[] = $this->l('Error while creating feed file');
+		}
 	}
 	
 	private function _xmlentities($string)
@@ -607,8 +613,20 @@ class GoogleBase extends Module
 				<p class="clear">'.$this->l('Mandatory unless you specify the Manufacturer and MPN (see above). Either: EAN13 (EU) or UPC (US)').'</p>
 			  </div>
 			  <input name="btnUpdate" id="btnUpdate" class="button" value="'.((!file_exists($this->winFixFilename(Configuration::get($this->name.'_filepath')))) ? $this->l('Update Settings') : $this->l('Update Settings')).'" type="submit" />
+					</fieldset>';
+				if ($this->_compat > 14) {
+					if (Tools::usingSecureMode())
+						$domain = Tools::getShopDomainSsl(true);
+					else
+						$domain = Tools::getShopDomain(true);
+					$this->_html .= '<fieldset class="space">
+					<legend><img src="../img/admin/cog.gif" alt="" class="middle" />'.$this->l('Cron Job').'</legend>
+					<p>
+						<b>'.$domain.__PS_BASE_URI__.'modules/googlebase/googlebase-cron.php?token='.substr(Tools::encrypt('googlebase/cron'),0,10).'&module=googlebase</b>
+					</p>
 					</fieldset>
 				</form><br/>';
+				}
 	}
 	
 	private function _postValidation()
