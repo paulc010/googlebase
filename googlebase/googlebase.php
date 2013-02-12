@@ -1,4 +1,10 @@
 <?php
+/********************************************************************
+ * googlebase.php - www.ecartservice.net
+ *
+ * $LastChangedDate$
+ * $Rev$
+ */
 
 if (!defined('_PS_VERSION_'))
 	exit;
@@ -35,7 +41,7 @@ class GoogleBase extends Module
 		$this->tab = $this->_compat > 13 ? 'advertising_marketing' : 'Tools';
 		if ($this->_compat > 13)
 			$this->author = 'eCartService.net';
-		$this->version = '0.8';
+		$this->version = '0.8.1';
 		$this->need_instance = 0;
 		
 		parent::__construct();
@@ -80,7 +86,7 @@ class GoogleBase extends Module
 		if (!Configuration::get($this->name.'_gtin'))
 			Configuration::updateValue($this->name.'_gtin', 'ean13');
 		if (!Configuration::get($this->name.'_use_supplier'))
-			Configuration::updateValue($this->name.'_use_supplier', 1);
+			Configuration::updateValue($this->name.'_use_supplier', 'on');
 		if (!Configuration::get($this->name.'_currency'))
 			Configuration::updateValue($this->name.'_currency', (int)Configuration::get('PS_CURRENCY_DEFAULT'));
 		if (!Configuration::get($this->name.'_condition'))
@@ -107,12 +113,17 @@ class GoogleBase extends Module
 			Configuration::updateValue($this->name.'_lang', (int)$this->_cookie->id_lang);
 			$this->id_lang = (int)$this->_cookie->id_lang;
 			$this->lang_iso = strtolower(Language::getIsoById($this->id_lang));
-			$this->warnings[] = $this->l('Language configuration is invalid - reset to default.');
+			$this->_warnings[] = $this->l('Language configuration is invalid - reset to default.');
 		}
 	  
 		$this->gtin_field = Configuration::get($this->name.'_gtin');
 	  
 		$this->use_supplier = Configuration::get($this->name.'_use_supplier');
+		// Fix old setting method
+		if ($this->use_supplier == '1') {
+			Configuration::updateValue($this->name.'_use_supplier', 'on');
+			$this->use_supplier = 'on';
+		}
 	  
 		$this->currencies = $this->getCurrencies();
 		$this->id_currency = intval(Configuration::get($this->name.'_currency'));
@@ -120,7 +131,7 @@ class GoogleBase extends Module
 		{
 			Configuration::updateValue($this->name.'_currency', (int)Configuration::get('PS_CURRENCY_DEFAULT'));
 			$this->id_currency = (int)Configuration::get('PS_CURRENCY_DEFAULT');
-			$this->warnings[] = $this->l('Currency configuration is invalid - reset to default.');
+			$this->_warnings[] = $this->l('Currency configuration is invalid - reset to default.');
 		}
 	  
 		$this->default_condition = Configuration::get($this->name.'_condition');
@@ -352,16 +363,20 @@ class GoogleBase extends Module
 			$item_data .= $this->_xmlElement('g:gtin', $product['ean13']);
 		else if ($this->gtin_field == 'upc' && !empty($product['upc']))
 			$item_data .= $this->_xmlElement('g:gtin',$product['upc']);
-		if ($this->_compat < 15) {
-			if ($this->use_supplier && !empty($product['supplier_reference']));
-				$item_data .= $this->_xmlElement('g:mpn',$product['supplier_reference']);
-		} else {
-			if (isset($product['id_supplier']) && !empty($product['id_supplier'])) {
-				$item_data .= $this->_xmlElement('g:mpn',ProductSupplier::getProductSupplierReference($product['id_product'], 0, $product['id_supplier']));
-			}
-		}
 		
-			
+		if ($this->use_supplier == 'on') {
+			if ($this->_compat < 15) {
+				if (!empty($product['supplier_reference']));
+					$item_data .= $this->_xmlElement('g:mpn',$product['supplier_reference']);
+			} else {
+				if (isset($product['id_supplier']) && !empty($product['id_supplier'])) {
+					$item_data .= $this->_xmlElement('g:mpn',ProductSupplier::getProductSupplierReference($product['id_product'], 0, $product['id_supplier']));
+				}
+			}
+		} else {
+				if (!empty($product['reference']));
+					$item_data .= $this->_xmlElement('g:mpn',$product['reference']);
+		}
 		// 7. Nearby Stores (US & UK only)
 		if ($this->nearby and $this->_compat > 13)
 			$item_data .= $this->_xmlElement('g:online_only',$product['online_only'] == 1 ? 'y' : 'n');
@@ -501,7 +516,8 @@ class GoogleBase extends Module
 	
 	private function _displayForm()
 	{
-		$this->use_supplier = (int)(Tools::isSubmit('use_supplier') ? 1 : Configuration::get($this->name.'_use_supplier'));
+
+		$this->use_supplier = Configuration::get($this->name.'_use_supplier', 'on');
 		$this->gtin_field = Tools::getValue('gtin', Configuration::get($this->name.'_gtin'));
 		$this->currency = Tools::getValue('currency', Configuration::get($this->name.'_currency'));
 		$this->id_lang = Tools::getValue('language', Configuration::get($this->name.'_lang'));
@@ -568,8 +584,8 @@ class GoogleBase extends Module
 						<br />
 			  <label>'.$this->l('Use Supplier Reference').'</label>
 			  <div class="margin-form">
-				<input type="checkbox" name="use_supplier" id="use_supplier" value="1"' . ($this->use_supplier ? 'checked="checked" ' : '') . ' />
-				<p class="clear">'.$this->l('Use the supplier reference field as Manufacturers Part Number (MPN)').'</p>
+				<input type="checkbox" name="use_supplier" id="use_supplier" value="on"' . ($this->use_supplier == 'on' ? 'checked="checked" ' : '') . ' />
+				<p class="clear">'.$this->l('Use the supplier reference field (default) rather than the reference field as Manufacturers Part Number (MPN)').'</p>
 			  </div>
 			  <label>'.$this->l('Unique Product Identifier').'</label>
 			  <div class="margin-form">
@@ -587,6 +603,8 @@ class GoogleBase extends Module
 	{
 		// TODO Need to review form validation.....
 		// Used $_POST here to allow us to modify them directly - naughty I know :)
+  
+		Configuration::updateValue($this->name.'_use_supplier', Tools::getValue('use_supplier') ? Tools::getValue('use_supplier') : 'off');
   
 		if (empty($_POST['description']) OR strlen($_POST['description']) > 10000)
 			$this->_mod_errors[] = $this->l('Description is invalid');
@@ -621,7 +639,7 @@ class GoogleBase extends Module
 				Configuration::updateValue($this->name.'_description', Tools::getValue('description'));
 				Configuration::updateValue($this->name.'_filepath', addslashes($_POST['filepath'])); // the Tools class kills the windows file name separators :(
 				Configuration::updateValue($this->name.'_gtin', Tools::getValue('gtin'));	// gtin field selection
-				Configuration::updateValue($this->name.'_use_supplier', (int)(Tools::isSubmit('use_supplier')));
+				Configuration::updateValue($this->name.'_use_supplier', Tools::getValue('use_supplier') ? Tools::getValue('use_supplier') : 'off');
 				Configuration::updateValue($this->name.'_currency', (int)Tools::getValue('currency')); // Feed currency
 				Configuration::updateValue($this->name.'_lang', (int)Tools::getValue('language'));	// language to generate feed for
   
