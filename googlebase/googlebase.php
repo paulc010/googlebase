@@ -591,7 +591,7 @@ class GoogleBase extends Module
 					</p>
 					</fieldset>';
 				}
-				$this->_html = '</form><br/>';
+				$this->_html .= '</form><br/>';
 	}
 	
 	private function _postValidation()
