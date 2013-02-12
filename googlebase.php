@@ -19,11 +19,11 @@ class GoogleBase extends Module
 	private $lang_iso;
 	private $id_currency;
 	private $currencies;
-  	private $country;
-  	private $target_country;
-  	private $default_tax;
-  	private $ignore_tax;
-  	private $ignore_shipping;
+	private $country;
+	private $target_country;
+	private $default_tax;
+	private $ignore_tax;
+	private $ignore_shipping;
 	private $gtin_field;
 	private $use_supplier;
 	private $nearby;
@@ -367,38 +367,562 @@ class GoogleBase extends Module
 		*/
 		
 		// 3. Unique Product Identifiers
-		if ($product['manufacturer_name'])
-			$item_data .= $this->_xmlElement('g:brand',$product['manufacturer_name'], true);
-		if ($this->gtin_field == 'ean13' && !empty($product['ean13']))
-			$item_data .= $this->_xmlElement('g:gtin', sprintf('%1$013d',$product['ean13']));
-		else if ($this->gtin_field == 'upc' && !empty($product['upc']))
-			$item_data .= $this->_xmlElement('g:gtin',sprintf('%1$012d',$product['upc']));
-		if ($this->_compat < 15) {
-			if ($this->use_supplier && !empty($product['supplier_reference']));
-			$item_data .= $this->_xmlElement('g:mpn',$product['supplier_reference']);
-		} else {
-			if (isset($product['id_supplier']) && !empty($product['id_supplier'])) {
-				$item_data .= $this->_xmlElement('g:mpn',ProductSupplier::getProductSupplierReference($product['id_product'], 0, $product['id_supplier']));
-			}
-		}
-		
-    	// 6. Tax & Shipping
-    	if ($this->country == 'United States' && $this->_compat > 13 && !$this->ignore_tax)
-      		$item_data .= $this->_xmlTaxGroups($product);
+		// brand
+		$item_data .= $this->_xmlElement('g:brand',$product['manufacturer_name'], true);
+		// gtin values
+		$item_data .= $this->_xmlElement('g:gtin', $this->_getGtinValue($product), false, false, true);
+		// manufacturer part # (supplier ref)
+		$item_data .= $this->_xmlElement('g:mpn','<![CDATA['.$this->_getCompatibleSupplierRef($product).']]>');
+		// 6. Tax & Shipping
+		if ($this->country == 'United States' && $this->_compat > 13 && !$this->ignore_tax)
+			$item_data .= $this->_xmlTaxGroups($product);
 
-    	if (!$this->ignore_shipping && $this->_compat > 13)
-      		$item_data .= $this->_xmlShippingGroups($product);
+		if (!$this->ignore_shipping && $this->_compat > 13)
+			$item_data .= $this->_xmlShippingGroups($product);
 
-   		$item_data .= $this->_xmlElement('g:shipping_weight',$product['weight'] ? $product['weight'].' '.Configuration::get('PS_WEIGHT_UNIT') : 0);
+   	$item_data .= $this->_xmlElement('g:shipping_weight',$product['weight'] ? number_format($product['weight'],2, '.', '').' '.Configuration::get('PS_WEIGHT_UNIT') : 0);
 
 		// 7. Nearby Stores (US & UK only)
-    	if (($this->country == 'United States' || $this->country == 'United Kingdom') && $this->_compat > 13)
+    if (($this->country == 'United States' || $this->country == 'United Kingdom') && $this->_compat > 13)
 			$item_data .= $this->_xmlElement('g:online_only',$product['online_only'] == 1 ? 'y' : 'n');
 		
 		return $item_data;
 	}
+  
+	private function _getGtinValue($product)
+	{
+		$gtin = '';
 	
-	private function _xmlTaxGroups($id_product)
+		switch ($this->gtin_field) {
+			case 'ean13':
+				$gtin = sprintf('%1$013d',$product['ean13']);
+			break;
+			case 'upc':
+				$gtin = sprintf('%1$012d',$product['upc']);
+			break;
+			case 'isbn10':
+				$gtin = sprintf('%1$010d',$product['ean13']);
+			break;
+			case 'isbn13':
+				$gtin = sprintf('%1$013d',$product['ean13']);
+			break;
+			case 'jan8':
+				$gtin = sprintf('%1$08d',$product['ean13']);
+			break;
+			case 'jan13':
+				$gtin = sprintf('%1$013d',$product['ean13']);
+			break;
+			case 'none':
+				$gtin = '';
+			break;
+		}
+		return $gtin;
+	}
+
+	private function _getCompatibleCondition($condition)
+	{
+		switch ($condition) {
+			case 'new':
+				$condition = $this->l('new');
+			break;
+			case 'used':
+				$condition = $this->l('used');
+			break;
+			case 'refurbished':
+				$condition = $this->l('refurbished');
+			break;
+		}
+		return $condition;
+	}
+	
+  private function _getCompatiblePrice($id_product, $id_product_attrib = NULL, $force_tax = false)
+	{
+    if ($this->country == 'United States' && !$force_tax)
+      $use_tax = false;
+    else
+      $use_tax = true;
+
+    $price = number_format(Tools::convertPrice(Product::getPriceStatic(intval($id_product), $use_tax, $id_product_attrib, 6, NULL, false, false), $this->currencies[$this->id_currency]), 2, '.', '');
+		
+		return $price.' '.$this->currencies[$this->id_currency]->iso_code;
+	}
+	
+  private function _getCompatibleSalePrice($id_product, $id_product_attrib = NULL, $force_tax = false)
+	{
+    if ($this->country == 'United States' && !$force_tax)
+      $use_tax = false;
+    else
+      $use_tax = true;
+
+    $price = number_format(Tools::convertPrice(Product::getPriceStatic(intval($id_product), $use_tax, $id_product_attrib, 6), $this->currencies[$this->id_currency]), 2, '.', '');
+		
+		return $price.' '.$this->currencies[$this->id_currency]->iso_code;
+	}
+	
+	private function _getCompatibleImageLinks($product)
+	{
+		if ($this->_compat > 14) {
+			$link = $this->context->link;
+		} else {
+		$link = new Link();
+		}
+		$image_data = array(array('link' => '', 'valid' => 0), array('link' => '', 'valid' => 0));
+		$images = Image::getImages($this->id_lang, $product['id_product']);
+		
+		switch ($this->_compat) {
+			case '11':
+				if (isset($images[0])) {
+					$image_data[0]['link'] = 'http://'.$_SERVER['HTTP_HOST'].$this->psdir.'img/p/'.$images[0]['id_product'].'-'.$images[0]['id_image'].'-large.jpg';
+					$image_data[0]['valid'] = 1;
+				}
+				if (isset($images[1])) {
+					$image_data[1]['link'] = 'http://'.$_SERVER['HTTP_HOST'].$this->psdir.'img/p/'.$images[1]['id_product'].'-'.$images[1]['id_image'].'-large.jpg';
+					$image_data[1]['valid'] = 1;
+				}
+			break;
+		  
+			case '15':
+			case '14':
+				if (isset($images[0])) {
+					$image_data[0]['link'] = $link->getImageLink($product['link_rewrite'], (int)$product['id_product'].'-'.(int)$images[0]['id_image']);
+					$image_data[0]['valid'] = 1;
+				}
+				if (isset($images[1])) {
+					$image_data[1]['link'] = $link->getImageLink($product['link_rewrite'], (int)$product['id_product'].'-'.(int)$images[1]['id_image']);
+					$image_data[1]['valid'] = 1;
+				}
+			break;
+		  
+			default:
+				if (isset($images[0])) {
+					$image_data[0]['link'] = 'http://'.$_SERVER['HTTP_HOST'].$this->psdir.$link->getImageLink($product['link_rewrite'], (int)$product['id_product'].'-'.(int)$images[0]['id_image']);
+					$image_data[0]['valid'] = 1;
+				}
+				if (isset($images[1])) {
+					$image_data[1]['link'] = 'http://'.$_SERVER['HTTP_HOST'].$this->psdir.$link->getImageLink($product['link_rewrite'], (int)$product['id_product'].'-'.(int)$images[1]['id_image']);;
+					$image_data[1]['valid'] = 1;
+				}
+			break;
+		
+		}
+		return $image_data;
+	}
+	
+	private function _getCompatibleProductLink($product)
+	{
+		if ($this->_compat > 14) {
+			$link = $this->context->link;
+		} else {
+		$link = new Link();
+		}
+		switch ($this->_compat) {
+			case '11':
+				$product_link = $link->getProductLink($product['id_product'], $product['link_rewrite']);
+				// Make 1.1 result look like 1.2+
+				if (strpos( $product_link, 'http://' ) === false )
+					$product_link = 'http://'.$_SERVER['HTTP_HOST'].$product_link;
+			break;
+		  
+			case '12':
+				$product_link = $link->getProductLink((int)($product['id_product']), $product['link_rewrite'], $this->_getrawCatRewrite($product['id_category_default']), $product['ean13']);
+			break;
+		
+			case '13':
+				$product_link = $link->getProductLink((int)($product['id_product']), $product['link_rewrite'], $this->_getrawCatRewrite($product['id_category_default']), $product['ean13'], (int)$this->id_lang);
+			break;
+		
+			default:
+				$product_link = $link->getProductLink($product, null, null, null, (int)$this->id_lang);
+			break;
+		}
+		
+		return $product_link;
+	}
+	
+	private function _getCompatibleSupplierRef($product) {
+		if ($this->_compat < 15) {
+			if ($this->use_supplier && !empty($product['supplier_reference'])) {
+				return $product['supplier_reference'];
+			}
+		} else {
+			if (isset($product['id_supplier']) && !empty($product['id_supplier'])) {
+				return ProductSupplier::getProductSupplierReference($product['id_product'], 0, $product['id_supplier']);
+			}
+		}	
+	}
+	
+	private function _displayFeed()
+	{
+		$filename = $this->winFixFilename(Configuration::get($this->name.'_filepath'));
+		if(file_exists($filename)) {
+			$this->_html .= '<fieldset><legend><img src="../img/admin/enabled.gif" alt="" class="middle" />'.$this->l('Feed Generated').'</legend>';
+			if (strpos($filename,realpath($this->directory())) === FALSE)
+			{
+				$this->_html .= '<p>'.$this->l('Your Google Base feed file is available via ftp as the following:').' <b>'.$filename.'</b></p><br />';
+			} else {
+				$this->_html .= '<p>'.$this->l('Your Google Base feed file is online at the following address:').' <a href="'.$this->file_url().'"><b>'.$this->file_url().'</b></a></p><br />';
+			}
+			$this->_html .= $this->l('Last Updated:').' <b>'.date('m.d.y G:i:s', filemtime($filename)).'</b><br />';
+			$this->_html .= '</fieldset>';
+		} else {
+			$this->_html .= '<fieldset><legend><img src="../img/admin/delete.gif" alt="" class="middle" />'.$this->l('No Feed Generated').'</legend>';
+			$this->_html .= '<br /><h3 class="alert error" style="margin-bottom: 20px">No feed file has been generated at this location yet!</h3>';
+			$this->_html .= '</fieldset>';
+		}
+	}
+	
+	private function _displayForm()
+	{
+		$this->use_supplier = (int)(Tools::isSubmit('use_supplier') ? 1 : Configuration::get($this->name.'_use_supplier'));
+		$this->gtin_field = Tools::getValue('gtin', Configuration::get($this->name.'_gtin'));
+		$this->currency = Tools::getValue('currency', Configuration::get($this->name.'_currency'));
+		$this->id_lang = Tools::getValue('language', Configuration::get($this->name.'_lang'));
+		$this->country = Tools::getValue('country', Configuration::get($this->name.'_country'));
+		$this->ignore_tax = (int)(Tools::isSubmit('ignore_tax') ? 1 : Configuration::get($this->name.'_ignore_tax'));
+		$this->ignore_shipping = (int)(Tools::isSubmit('ignore_shipping') ? 1 : Configuration::get($this->name.'_ignore_shipping'));
+	  
+		$this->_html .=
+				'<form action="'.$_SERVER['REQUEST_URI'].'" method="post">
+				<center><input name="btnSubmit" id="btnSubmit" class="button" value="'.$this->l('Generate XML feed file').'" type="submit" /></center>
+				</form>'.
+				'<form action="'.$_SERVER['REQUEST_URI'].'" method="post">
+					<br />
+					<fieldset>
+						<legend><img src="../img/admin/cog.gif" alt="" class="middle" />'.$this->l('Settings').'</legend>
+						<fieldset class="space">
+							<p style="font-size: smaller;"><img src="../img/admin/unknown.gif" alt="" class="middle" />'.
+								$this->l('The following allow localisation of the feed for both language and currency, which can be selected independently.
+								Remember to change the <strong>output location</strong> below if you want to generate and retain multiple feed files with different
+								language and currency combinations. Note that after updating these settings a new recommended Output Location will be suggested below
+                but <em>will not automatically be used</em>. You should select the country you are targetting below to ensure regional differences are handled correctly.').'
+							</p>
+						</fieldset>
+						<br />
+			  <label>'.$this->l('Currency').'</label>
+			  <div class="margin-form">
+				<select name="currency" id="currency" >';
+				foreach ($this->currencies as $id => $currency) {
+					if ($id)
+					$this->_html .= '<option value="'.$id.'"'.($this->currency == $id ? ' selected="selected"' : '').' > '.$currency->iso_code.' </option>';
+				}
+				$this->_html .='</select>
+				<p class="clear">'.$this->l('Store default ='). ' ' . $this->currencies[(int)Configuration::get('PS_CURRENCY_DEFAULT')]->iso_code.'</p>
+			  </div>
+			  <label>'.$this->l('Language').'</label>
+			  <div class="margin-form">
+				<select name="language" id="language" >';
+				foreach ($this->languages as $language) {
+					$this->_html .= '<option value="'.$language['id_lang'].'"'.($this->id_lang == $language['id_lang'] ? ' selected="selected"' : '').' > '.$language['name'].' </option>';
+				}
+				$this->_html .='</select>
+				<p class="clear">'.$this->l('Store default ='). ' ' . $this->languages[$this->_cookie->id_lang]['name'].'</p>
+			  </div>
+				<label>'.$this->l('Target Country').'</label>
+				<div class="margin-form">
+					<select name="country" id="country" >
+					<option value="Australia"'.($this->country == 'Australia' ? ' selected="selected"' : '').' >Australia</option>
+					<option value="Brazil"'.($this->country == 'Brazil' ? ' selected="selected"' : '').' >Brazil</option>
+					<option value="Switzerland"'.($this->country == 'Switzerland' ? ' selected="selected"' : '').' >Switzerland</option>
+					<option value="China"'.($this->country == 'China' ? ' selected="selected"' : '').' >China</option>
+					<option value="Germany"'.($this->country == 'Germany' ? ' selected="selected"' : '').' >Germany</option>
+					<option value="Spain"'.($this->country == 'Spain' ? ' selected="selected"' : '').' >Spain</option>
+					<option value="France"'.($this->country == 'France' ? ' selected="selected"' : '').' >France</option>
+					<option value="United Kingdom"'.($this->country == 'United Kingdom' ? ' selected="selected"' : '').' >United Kingdom</option>
+					<option value="Italy"'.($this->country == 'Italy' ? ' selected="selected"' : '').' >Italy</option>
+					<option value="Japan"'.($this->country == 'Japan' ? ' selected="selected"' : '').' >Japan</option>
+					<option value="Netherlands"'.($this->country == 'Netherlands' ? ' selected="selected"' : '').' >Netherlands</option>
+					<option value="United States"'.($this->country == 'United States' ? ' selected="selected"' : '').' >United States</option>
+					</select>
+					<p class="clear">'.$this->l('For country-specific rules. Note that the language and currency settings should match.').'</p>
+				</div>
+				<label>'.$this->l('Default Tax: ').'</label>
+				<div class="margin-form">
+					<input name="default_tax" type="text" value="'.Tools::getValue('default_tax', Configuration::get($this->name.'_default_tax')).'"/>
+					<p class="clear">'.$this->l('<strong>US Only</strong>. Set this value to the percentage rate you defined in Merchant Center. Any tax group matching this rate will be omitted (reduces xml file size).').'</p>
+				</div>
+				<label>'.$this->l('Ignore Tax: ').'</label>
+				<div class="margin-form">
+					<input type="checkbox" name="ignore_tax" id="ignore_tax" value="1"' . ($this->ignore_tax ? 'checked="checked" ' : '') . ' />
+					<p class="clear">'.$this->l('<strong>US Only</strong>. When checked no tax group information will be generated.').'</p>
+				</div>
+				<label>'.$this->l('Ignore Shipping: ').'</label>
+				<div class="margin-form">
+					<input type="checkbox" name="ignore_shipping" id="ignore_shipping" value="1"' . ($this->ignore_shipping ? 'checked="checked" ' : '') . ' />
+					<p class="clear">'.$this->l('When checked no shipping information will be generated.').'</p>
+				</div>
+				<fieldset class="space">
+							<p style="font-size: smaller;"><img src="../img/admin/unknown.gif" alt="" class="middle" />'.
+								$this->l('The minimum <em>required</em> configuration is to define a description for your feed. This should be text (not html),
+								up to a maximum length of 10,000 characters. Ideally, greater than 15 characters and 3 words. It is suggested that this should be written
+								in the language selected above.').'
+							</p>
+				</fieldset>
+				<br />
+				<label>'.$this->l('Feed Description: ').'</label>
+				<div class="margin-form">
+					<textarea name="description" rows="5" cols="80" >'.Tools::getValue('description', Configuration::get($this->name.'_description')).'</textarea>
+				<p class="clear">'.$this->l('Example: Our range of fabulous products').'</p>
+				</div>
+				<label>'.$this->l('Output Location: ').'</label>
+				<div class="margin-form">
+					<input name="filepath" type="text" style="width: 600px;" value="'.(isset($_POST['filepath']) ? $_POST['filepath'] : $this->winFixFilename(Configuration::get($this->name.'_filepath'))).'"/>
+					<p class="clear">'.$this->l('Recommended path:').' '.$this->defaultOutputFile().'</p>
+				</div>
+				<fieldset class="space">
+							<p style="font-size: smaller;"><img src="../img/admin/unknown.gif" alt="" class="middle" />'.
+						$this->l('Unique product identifiers such as UPC, EAN, JAN or ISBN allow Google to show your listing on the appropriate product page. If you don\'t provide
+										 the required unique product identifiers, your store may not appear on product pages and all your items may be removed from Product Search.<br /><br />').
+						$this->l('Google require unique product identifiers for all products - except for custom made goods. For clothing, you must submit the \'brand\' attribute.
+										 For media (such as books, movies, music and video games), you must submit the \'gtin\' attribute. In all cases, they recommend that you submit
+										 all three attributes.<br /><br />').
+						$this->l('You need to submit at least two attributes of \'brand\', \'gtin\' and \'mpn\', but Google recommend that you submit all three if available. For media
+										 (such as books, films, music and video games), you must submit the \'gtin\' attribute, but they recommend that you include \'brand\' and \'mpn\' if
+										 available.').
+						'</p>
+						</fieldset>
+						<br />
+						<label>'.$this->l('Use Supplier Reference').'</label>
+						<div class="margin-form">
+						<input type="checkbox" name="use_supplier" id="use_supplier" value="1"' . ($this->use_supplier ? 'checked="checked" ' : '') . ' />
+								<p class="clear">'.$this->l('Use the supplier reference field as Manufacturers Part Number (MPN). This code uniquely identifies the product to its
+																						manufacturer. In particular, the combination of brand and MPN clearly specifies one product. Required for all items -
+																						except clothing, media, and custom made goods or if you\'re providing \'brand\' and \'gtin\'.').'
+								</p>
+						</div>
+							<label>'.$this->l('Global Trade Item Numbers').'</label>
+						<div class="margin-form">
+							<input type="radio" name="gtin" id="gtin_0" value="ean13" '.($this->gtin_field == 'ean13' ? 'checked="checked" ' : '').' > EAN13</option>
+							<input type="radio" name="gtin" id="gtin_1" value="upc" '.($this->gtin_field == 'upc' ? 'checked="checked" ' : '').' > UPC</option>
+							<input type="radio" name="gtin" id="gtin_2" value="isbn10" '.($this->gtin_field == 'isbn10' ? 'checked="checked" ' : '').' > ISBN-10</option>
+							<input type="radio" name="gtin" id="gtin_3" value="isbn13" '.($this->gtin_field == 'isbn13' ? 'checked="checked" ' : '').' > ISBN-13</option>
+							<input type="radio" name="gtin" id="gtin_4" value="jan8" '.($this->gtin_field == 'jan8' ? 'checked="checked" ' : '').' > JAN (8-digit)</option>
+							<input type="radio" name="gtin" id="gtin_5" value="jan13" '.($this->gtin_field == 'jan13' ? 'checked="checked" ' : '').' > JAN (13-digit)</option>
+							<input type="radio" name="gtin" id="gtin_6" value="none" '.($this->gtin_field == 'none' ? 'checked="checked" ' : '').' > None</option>
+							<p class="clear">'.$this->l('Choose the identifier most suitable for your region and/or products. These identifiers are UPC (in North America),
+																					EAN (in Europe), JAN (in Japan) and ISBN (for books). JAN and ISBN numbers should be entered in the
+																					Prestashop EAN field. You can include any of these values within this attribute:').'</p>
+							<ul>
+							<li>'.$this->l('UPC: 12-digit number such as 001234567891').'</li>
+							<li>'.$this->l('EAN: 13-digit number such as 1001234567891').'</li>
+							<li>'.$this->l('JAN: 8 or 13-digit number such as 12345678 or 1234567890123').'</li>
+							<li>'.$this->l('ISBN: 10 or 13-digit number such as 0451524233. If you have both, only include 13-digit number.').'</li>
+							</ul>
+							<p class="clear">'.$this->l('Required for all items - except for clothing and custom made goods, or if you\'re providing \'brand\' and \'mpn\'.').'</p>
+						</div>
+						<p style="font-size: smaller;"><img src="../img/admin/unknown.gif" alt="" class="middle" />'.
+							$this->l('<strong>Remember to click below to save any changes made before running the feed.</strong>').
+							'</p>
+						<input name="btnUpdate" id="btnUpdate" class="button" value="'.$this->l('Update Settings').'" type="submit" />
+				</fieldset>
+			</form><br/>';
+	}
+	
+	private function _postValidation()
+	{
+		// TODO Need to review form validation.....
+		// Used $_POST here to allow us to modify them directly - naughty I know :)
+  
+		if (empty($_POST['description']) OR strlen($_POST['description']) > 10000)
+			$this->_mod_errors[] = $this->l('Description is invalid');
+		// could check that this is a valid path, but the next test will
+		// do that for us anyway
+		// But first we need to get rid of the escape characters
+		$_POST['filepath'] = $this->winFixFilename($_POST['filepath']);
+		if (empty($_POST['filepath']) OR (strlen($_POST['filepath']) > 255))
+			$this->_mod_errors[] = $this->l('The target location is invalid');
+  
+		if (file_exists($_POST['filepath']) && !is_writable($_POST['filepath']))
+			$this->_mod_errors[] = $this->l('File error.<br />Cannot write to').' '.$_POST['filepath'];
+	}
+	
+	function getContent()
+	{
+		$this->_html .= '<h2>'.$this->l('[BETA]Google Base Products Feed').' {compat='.$this->_compat.'}</h2>';
+		if(!is_writable(realpath($this->directory())))
+			$this->_warnings[] = $this->l('Output directory must be writable or the feed file will need to be pre-created with write permissions.');
+  
+		if(isset($this->_warnings) AND sizeof($this->_warnings))
+		{
+		  $this->_displayWarnings($this->_warnings);
+		}
+  
+		if (Tools::getValue('btnUpdate'))
+		{
+			$this->_postValidation();
+  
+			if (!sizeof($this->_mod_errors))
+			{
+				Configuration::updateValue($this->name.'_description', Tools::getValue('description'));
+				Configuration::updateValue($this->name.'_filepath', addslashes($_POST['filepath'])); // the Tools class kills the windows file name separators :(
+				Configuration::updateValue($this->name.'_gtin', Tools::getValue('gtin'));	// gtin field selection
+				Configuration::updateValue($this->name.'_use_supplier', (int)(Tools::isSubmit('use_supplier')));
+				Configuration::updateValue($this->name.'_currency', (int)Tools::getValue('currency')); // Feed currency
+				Configuration::updateValue($this->name.'_lang', (int)Tools::getValue('language'));	// language to generate feed for
+        Configuration::updateValue($this->name.'_country', Tools::getValue('country'));
+        // A little fix just in case the % sign gets added....
+        Configuration::updateValue($this->name.'_default_tax', str_replace('%','',Tools::getValue('default_tax')));
+        Configuration::updateValue($this->name.'_ignore_tax', (int)(Tools::isSubmit('ignore_tax')));
+        Configuration::updateValue($this->name.'_ignore_shipping', (int)(Tools::isSubmit('ignore_shipping')));
+  
+				$this->_getGlobals();
+			} else {
+				if (isset($this->_mod_errors) AND sizeof($this->_mod_errors)) {
+					$this->_displayErrors($this->_mod_errors);
+				}
+			}
+		} else if (Tools::getValue('btnSubmit')) {
+			// Go try and generate the feed
+			$this->_postProcess();
+		}
+  
+		$this->_displayForm();
+		$this->_displayFeed();
+  
+		return $this->_html;
+	}
+	
+	public function	_displayWarnings($warn)
+	{
+		$str_output = '';
+		if (!empty($warn)) {
+			$str_output .= '<script type="text/javascript">
+					$(document).ready(function() {
+						$(\'#linkSeeMore\').unbind(\'click\').click(function(){
+							$(\'#seeMore\').show(\'slow\');
+							$(this).hide();
+							$(\'#linkHide\').show();
+							return false;
+						});
+						$(\'#linkHide\').unbind(\'click\').click(function(){
+							$(\'#seeMore\').hide(\'slow\');
+							$(this).hide();
+							$(\'#linkSeeMore\').show();
+							return false;
+						});
+						$(\'#hideWarn\').unbind(\'click\').click(function(){
+							$(\'.warn\').hide(\'slow\', function (){
+								$(\'.warn\').remove();
+							});
+							return false;
+						});
+					});
+				  </script>
+			<div class="warn">';
+			if (!is_array($warn))
+				$str_output .= '<img src="../img/admin/warn2.png" />'.$warn;
+			else
+			{	$str_output .= '<span style="float:right"><a id="hideWarn" href=""><img alt="X" src="../img/admin/close.png" /></a></span><img src="../img/admin/warn2.png" />'.
+				(count($warn) > 1 ? $this->l('There are') : $this->l('There is')).' '.count($warn).' '.(count($warn) > 1 ? $this->l('warnings') : $this->l('warning'))
+				.'<span style="margin-left:20px;" id="labelSeeMore">
+				<a id="linkSeeMore" href="#" style="text-decoration:underline">'.$this->l('Click here to see more').'</a>
+				<a id="linkHide" href="#" style="text-decoration:underline;display:none">'.$this->l('Hide warning').'</a></span><ul style="display:none;" id="seeMore">';
+				foreach($warn as $val)
+					$str_output .= '<li>'.$val.'</li>';
+				$str_output .= '</ul>';
+			}
+			$str_output .= '</div>';
+		}
+		echo $str_output;
+	}
+	
+	/**
+	 * Display errors
+	 */
+	public function _displayErrors()
+	{
+		if ($nbErrors = count($this->_mod_errors))
+		{
+			echo '<script type="text/javascript">
+				$(document).ready(function() {
+					$(\'#hideError\').unbind(\'click\').click(function(){
+						$(\'.error\').hide(\'slow\', function (){
+							$(\'.error\').remove();
+						});
+						return false;
+					});
+				});
+			  </script>
+			<div class="error"><span style="float:right"><a id="hideError" href=""><img alt="X" src="../img/admin/close.png" /></a></span><img src="../img/admin/error2.png" />';
+			if (count($this->_mod_errors) == 1)
+				echo $this->_mod_errors[0];
+			else
+			{
+				echo $nbErrors.' '.$this->l('errors').'<br /><ol>';
+				foreach ($this->_mod_errors AS $error)
+					echo '<li>'.$error.'</li>';
+				echo '</ol>';
+			}
+			echo '</div>';
+		}
+	}
+	
+	public function getAvailability($product)
+	{
+		if ($product["quantity"]> 0)
+			return $this->l('in stock');
+    else if ( self::checkQty($product,1))
+			return $this->l('available for order');
+		else
+			return $this->l('out of stock');
+	}
+	
+	public function getCurrencies($object = true, $active = 1)
+	{
+		switch ($this->_compat) {
+			case '14':
+				$tab = Db::getInstance()->ExecuteS('
+							SELECT *
+							FROM `'._DB_PREFIX_.'currency`
+							WHERE `deleted` = 0
+							'.($active == 1 ? 'AND `active` = 1' : '').'
+							ORDER BY `name` ASC');
+			break;
+			default:
+				$tab = Db::getInstance()->ExecuteS('
+							SELECT *
+							FROM `'._DB_PREFIX_.'currency`
+							WHERE `deleted` = 0
+							ORDER BY `name` ASC');
+			break;
+		}
+  
+		if ($object)
+			foreach ($tab as $key => $currency)
+				$tab[$currency['id_currency']] = Currency::getCurrencyInstance($currency['id_currency']);
+		return $tab;
+	}
+	
+	public function getLanguages()
+	{
+		$languages = array();
+	
+		$result = Db::getInstance()->ExecuteS("
+						SELECT `id_lang`, `name`, `iso_code`, `active`
+						FROM `"._DB_PREFIX_."lang` WHERE `active` = '1'");
+	
+		foreach ($result AS $row)
+			  $languages[(int)($row['id_lang'])] = array('id_lang' => (int)($row['id_lang']), 'name' => $row['name'], 'iso_code' => $row['iso_code'], 'active' => (int)($row['active']));
+		
+		return $languages;
+	}
+	
+	private function checkQty($product, $qty)	// copied and amended form classes/Product.php
+	{
+		if (Pack::isPack((int)$product['id_product']) && !Pack::isInStock((int)$product['id_product']))
+			return false;
+
+		if (Product::isAvailableWhenOutOfStock(StockAvailable::outOfStock($product['id_product'])))
+			return true;
+
+//		if (isset($this->id_product_attribute))
+//			$id_product_attribute = $this->id_product_attribute;
+//		else
+			$id_product_attribute = 0;
+
+		return ($qty <= StockAvailable::getQuantityAvailableByProduct($product['id_product'], $id_product_attribute));
+	}
+	
+		private function _xmlTaxGroups($id_product)
 	{
 		  $states = array();
 		  $counties = array();
@@ -636,523 +1160,5 @@ class GoogleBase extends Module
 			$shipping_cost *= 1 + ($carrierTax / 100);
 
 		return number_format((float)($shipping_cost), 2, '.', '').' '.$this->currencies[$this->id_currency]->iso_code;
-	}
-  
-	private function _getGtinValue($product)
-	{
-		$gtin = '';
-	
-		switch ($this->gtin_field) {
-			case 'ean13':
-				$gtin = sprintf('%1$013d',$product['ean13']);
-			break;
-			case 'upc':
-				$gtin = sprintf('%1$012d',$product['upc']);
-			break;
-			case 'isbn10':
-				$gtin = sprintf('%1$010d',$product['ean13']);
-			break;
-			case 'isbn13':
-				$gtin = sprintf('%1$013d',$product['ean13']);
-			break;
-			case 'jan8':
-				$gtin = sprintf('%1$08d',$product['ean13']);
-			break;
-			case 'jan13':
-				$gtin = sprintf('%1$013d',$product['ean13']);
-			break;
-			case 'none':
-				$gtin = '';
-			break;
-		}
-		return $gtin;
-	}
-
-	private function _getCompatibleCondition($condition)
-	{
-		switch ($condition) {
-			case 'new':
-				$condition = $this->l('new');
-			break;
-			case 'used':
-				$condition = $this->l('used');
-			break;
-			case 'refurbished':
-				$condition = $this->l('refurbished');
-			break;
-		}
-		return $condition;
-	}
-	
-  private function _getCompatiblePrice($id_product, $id_product_attrib = NULL, $force_tax = false)
-	{
-    if ($this->country == 'United States' && !$force_tax)
-      $use_tax = false;
-    else
-      $use_tax = true;
-
-    $price = number_format(Tools::convertPrice(Product::getPriceStatic(intval($id_product), $use_tax, $id_product_attrib, 6, NULL, false, false), $this->currencies[$this->id_currency]), 2, '.', '');
-		
-		return $price.' '.$this->currencies[$this->id_currency]->iso_code;
-	}
-	
-  private function _getCompatibleSalePrice($id_product, $id_product_attrib = NULL, $force_tax = false)
-	{
-    if ($this->country == 'United States' && !$force_tax)
-      $use_tax = false;
-    else
-      $use_tax = true;
-
-    $price = number_format(Tools::convertPrice(Product::getPriceStatic(intval($id_product), $use_tax, $id_product_attrib, 6), $this->currencies[$this->id_currency]), 2, '.', '');
-		
-		return $price.' '.$this->currencies[$this->id_currency]->iso_code;
-	}
-	
-	private function _getCompatibleImageLinks($product)
-	{
-		if ($this->_compat > 14) {
-			$link = $this->context->link;
-		} else {
-		$link = new Link();
-		}
-		$image_data = array(array('link' => '', 'valid' => 0), array('link' => '', 'valid' => 0));
-		$images = Image::getImages($this->id_lang, $product['id_product']);
-		
-		switch ($this->_compat) {
-			case '11':
-				if (isset($images[0])) {
-					$image_data[0]['link'] = 'http://'.$_SERVER['HTTP_HOST'].$this->psdir.'img/p/'.$images[0]['id_product'].'-'.$images[0]['id_image'].'-large.jpg';
-					$image_data[0]['valid'] = 1;
-				}
-				if (isset($images[1])) {
-					$image_data[1]['link'] = 'http://'.$_SERVER['HTTP_HOST'].$this->psdir.'img/p/'.$images[1]['id_product'].'-'.$images[1]['id_image'].'-large.jpg';
-					$image_data[1]['valid'] = 1;
-				}
-			break;
-		  
-			case '15':
-			case '14':
-				if (isset($images[0])) {
-					$image_data[0]['link'] = $link->getImageLink($product['link_rewrite'], (int)$product['id_product'].'-'.(int)$images[0]['id_image']);
-					$image_data[0]['valid'] = 1;
-				}
-				if (isset($images[1])) {
-					$image_data[1]['link'] = $link->getImageLink($product['link_rewrite'], (int)$product['id_product'].'-'.(int)$images[1]['id_image']);
-					$image_data[1]['valid'] = 1;
-				}
-			break;
-		  
-			default:
-				if (isset($images[0])) {
-					$image_data[0]['link'] = 'http://'.$_SERVER['HTTP_HOST'].$this->psdir.$link->getImageLink($product['link_rewrite'], (int)$product['id_product'].'-'.(int)$images[0]['id_image']);
-					$image_data[0]['valid'] = 1;
-				}
-				if (isset($images[1])) {
-					$image_data[1]['link'] = 'http://'.$_SERVER['HTTP_HOST'].$this->psdir.$link->getImageLink($product['link_rewrite'], (int)$product['id_product'].'-'.(int)$images[1]['id_image']);;
-					$image_data[1]['valid'] = 1;
-				}
-			break;
-		
-		}
-		return $image_data;
-	}
-	
-	private function _getCompatibleProductLink($product)
-	{
-		if ($this->_compat > 14) {
-			$link = $this->context->link;
-		} else {
-		$link = new Link();
-		}
-		switch ($this->_compat) {
-			case '11':
-				$product_link = $link->getProductLink($product['id_product'], $product['link_rewrite']);
-				// Make 1.1 result look like 1.2+
-				if (strpos( $product_link, 'http://' ) === false )
-					$product_link = 'http://'.$_SERVER['HTTP_HOST'].$product_link;
-			break;
-		  
-			case '12':
-				$product_link = $link->getProductLink((int)($product['id_product']), $product['link_rewrite'], $this->_getrawCatRewrite($product['id_category_default']), $product['ean13']);
-			break;
-		
-			case '13':
-				$product_link = $link->getProductLink((int)($product['id_product']), $product['link_rewrite'], $this->_getrawCatRewrite($product['id_category_default']), $product['ean13'], (int)$this->id_lang);
-			break;
-		
-			default:
-				$product_link = $link->getProductLink($product, null, null, null, (int)$this->id_lang);
-			break;
-		}
-		
-		return $product_link;
-	}
-	
-	private function _displayFeed()
-	{
-		$filename = $this->winFixFilename(Configuration::get($this->name.'_filepath'));
-		if(file_exists($filename)) {
-			$this->_html .= '<fieldset><legend><img src="../img/admin/enabled.gif" alt="" class="middle" />'.$this->l('Feed Generated').'</legend>';
-			if (strpos($filename,realpath($this->directory())) === FALSE)
-			{
-				$this->_html .= '<p>'.$this->l('Your Google Base feed file is available via ftp as the following:').' <b>'.$filename.'</b></p><br />';
-			} else {
-				$this->_html .= '<p>'.$this->l('Your Google Base feed file is online at the following address:').' <a href="'.$this->file_url().'"><b>'.$this->file_url().'</b></a></p><br />';
-			}
-			$this->_html .= $this->l('Last Updated:').' <b>'.date('m.d.y G:i:s', filemtime($filename)).'</b><br />';
-			$this->_html .= '</fieldset>';
-		} else {
-			$this->_html .= '<fieldset><legend><img src="../img/admin/delete.gif" alt="" class="middle" />'.$this->l('No Feed Generated').'</legend>';
-			$this->_html .= '<br /><h3 class="alert error" style="margin-bottom: 20px">No feed file has been generated at this location yet!</h3>';
-			$this->_html .= '</fieldset>';
-		}
-	}
-	
-	private function _displayForm()
-	{
-		$this->use_supplier = (int)(Tools::isSubmit('use_supplier') ? 1 : Configuration::get($this->name.'_use_supplier'));
-		$this->gtin_field = Tools::getValue('gtin', Configuration::get($this->name.'_gtin'));
-		$this->currency = Tools::getValue('currency', Configuration::get($this->name.'_currency'));
-		$this->id_lang = Tools::getValue('language', Configuration::get($this->name.'_lang'));
-    	$this->country = Tools::getValue('country', Configuration::get($this->name.'_country'));
-    	$this->ignore_tax = (int)(Tools::isSubmit('ignore_tax') ? 1 : Configuration::get($this->name.'_ignore_tax'));
-    	$this->ignore_shipping = (int)(Tools::isSubmit('ignore_shipping') ? 1 : Configuration::get($this->name.'_ignore_shipping'));
-	  
-		$this->_html .=
-				'<form action="'.$_SERVER['REQUEST_URI'].'" method="post">
-				<center><input name="btnSubmit" id="btnSubmit" class="button" value="'.$this->l('Generate XML feed file').'" type="submit" /></center>
-				</form>'.
-				'<form action="'.$_SERVER['REQUEST_URI'].'" method="post">
-					<br />
-					<fieldset>
-						<legend><img src="../img/admin/cog.gif" alt="" class="middle" />'.$this->l('Settings').'</legend>
-						<fieldset class="space">
-							<p style="font-size: smaller;"><img src="../img/admin/unknown.gif" alt="" class="middle" />'.
-				$this->l('The following allow localisation of the feed for both language and currency, which can be selected independently.
-						 Remember to change the <strong>output location</strong> below if you want to generate and retain multiple feed files with different
-						 language and currency combinations. Note that after updating these settings a new recommended Output Location will be suggested below
-                     	but <em>will not automatically be used</em>. You should select the country you are targetting below to ensure regional differences are handled correctly.').'</p>
-						</fieldset>
-						<br />
-			  <label>'.$this->l('Currency').'</label>
-			  <div class="margin-form">
-				<select name="currency" id="currency" >';
-				foreach ($this->currencies as $id => $currency) {
-					if ($id)
-					$this->_html .= '<option value="'.$id.'"'.($this->currency == $id ? ' selected="selected"' : '').' > '.$currency->iso_code.' </option>';
-				}
-				$this->_html .='</select>
-				<p class="clear">'.$this->l('Store default ='). ' ' . $this->currencies[(int)Configuration::get('PS_CURRENCY_DEFAULT')]->iso_code.'</p>
-			  </div>
-			  <label>'.$this->l('Language').'</label>
-			  <div class="margin-form">
-				<select name="language" id="language" >';
-				foreach ($this->languages as $language) {
-					$this->_html .= '<option value="'.$language['id_lang'].'"'.($this->id_lang == $language['id_lang'] ? ' selected="selected"' : '').' > '.$language['name'].' </option>';
-				}
-				$this->_html .='</select>
-				<p class="clear">'.$this->l('Store default ='). ' ' . $this->languages[$this->_cookie->id_lang]['name'].'</p>
-			  </div>
-          <label>'.$this->l('Target Country').'</label>
-          <div class="margin-form">
-            <select name="country" id="country" >
-            <option value="Australia"'.($this->country == 'Australia' ? ' selected="selected"' : '').' >Australia</option>
-            <option value="Brazil"'.($this->country == 'Brazil' ? ' selected="selected"' : '').' >Brazil</option>
-            <option value="Switzerland"'.($this->country == 'Switzerland' ? ' selected="selected"' : '').' >Switzerland</option>
-            <option value="China"'.($this->country == 'China' ? ' selected="selected"' : '').' >China</option>
-            <option value="Germany"'.($this->country == 'Germany' ? ' selected="selected"' : '').' >Germany</option>
-            <option value="Spain"'.($this->country == 'Spain' ? ' selected="selected"' : '').' >Spain</option>
-            <option value="France"'.($this->country == 'France' ? ' selected="selected"' : '').' >France</option>
-            <option value="United Kingdom"'.($this->country == 'United Kingdom' ? ' selected="selected"' : '').' >United Kingdom</option>
-            <option value="Italy"'.($this->country == 'Italy' ? ' selected="selected"' : '').' >Italy</option>
-            <option value="Japan"'.($this->country == 'Japan' ? ' selected="selected"' : '').' >Japan</option>
-            <option value="Netherlands"'.($this->country == 'Netherlands' ? ' selected="selected"' : '').' >Netherlands</option>
-            <option value="United States"'.($this->country == 'United States' ? ' selected="selected"' : '').' >United States</option>
-            </select>
-            <p class="clear">'.$this->l('For country-specific rules. Note that the language and currency settings should match.').'</p>
-          </div>
-          <label>'.$this->l('Default Tax: ').'</label>
-					<div class="margin-form">
-						<input name="default_tax" type="text" value="'.Tools::getValue('default_tax', Configuration::get($this->name.'_default_tax')).'"/>
-						<p class="clear">'.$this->l('<strong>US Only</strong>. Set this value to the percentage rate you defined in Merchant Center. Any tax group matching this rate will be omitted (reduces xml file size).').'</p>
-					</div>
-          <label>'.$this->l('Ignore Tax: ').'</label>
-					<div class="margin-form">
-						<input type="checkbox" name="ignore_tax" id="ignore_tax" value="1"' . ($this->ignore_tax ? 'checked="checked" ' : '') . ' />
-						<p class="clear">'.$this->l('<strong>US Only</strong>. When checked no tax group information will be generated.').'</p>
-					</div>
-          <label>'.$this->l('Ignore Shipping: ').'</label>
-					<div class="margin-form">
-						<input type="checkbox" name="ignore_shipping" id="ignore_shipping" value="1"' . ($this->ignore_shipping ? 'checked="checked" ' : '') . ' />
-						<p class="clear">'.$this->l('When checked no shipping information will be generated.').'</p>
-					</div>
-			  <fieldset class="space">
-							<p style="font-size: smaller;"><img src="../img/admin/unknown.gif" alt="" class="middle" />'.
-				$this->l('The minimum <em>required</em> configuration is to define a description for your feed. This should be text (not html),
-						 up to a maximum length of 10,000 characters. Ideally, greater than 15 characters and 3 words. It is suggested that this should be written
-						 in the language selected above.').'</p>
-						</fieldset>
-						<br />
-						<label>'.$this->l('Feed Description: ').'</label>
-						<div class="margin-form">
-							<textarea name="description" rows="5" cols="80" >'.Tools::getValue('description', Configuration::get($this->name.'_description')).'</textarea>
-						<p class="clear">'.$this->l('Example: Our range of fabulous products').'</p>
-						</div>
-						<label>'.$this->l('Output Location: ').'</label>
-						<div class="margin-form">
-							<input name="filepath" type="text" style="width: 600px;" value="'.(isset($_POST['filepath']) ? $_POST['filepath'] : $this->winFixFilename(Configuration::get($this->name.'_filepath'))).'"/>
-							<p class="clear">'.$this->l('Recommended path:').' '.$this->defaultOutputFile().'</p>
-						</div>
-			  <fieldset class="space">
-							<p style="font-size: smaller;"><img src="../img/admin/unknown.gif" alt="" class="middle" />'.
-            $this->l('Unique product identifiers such as UPC, EAN, JAN or ISBN allow Google to show your listing on the appropriate product page. If you don\'t provide
-                     the required unique product identifiers, your store may not appear on product pages and all your items may be removed from Product Search.<br /><br />').
-            $this->l('Google require unique product identifiers for all products - except for custom made goods. For clothing, you must submit the \'brand\' attribute.
-                     For media (such as books, movies, music and video games), you must submit the \'gtin\' attribute. In all cases, they recommend that you submit
-                     all three attributes.<br /><br />').
-            $this->l('You need to submit at least two attributes of \'brand\', \'gtin\' and \'mpn\', but Google recommend that you submit all three if available. For media
-                     (such as books, films, music and video games), you must submit the \'gtin\' attribute, but they recommend that you include \'brand\' and \'mpn\' if
-                     available.').
-            '</p>
-						</fieldset>
-						<br />
-			  <label>'.$this->l('Use Supplier Reference').'</label>
-			  <div class="margin-form">
-				<input type="checkbox" name="use_supplier" id="use_supplier" value="1"' . ($this->use_supplier ? 'checked="checked" ' : '') . ' />
-            <p class="clear">'.$this->l('Use the supplier reference field as Manufacturers Part Number (MPN). This code uniquely identifies the product to its
-                                        manufacturer. In particular, the combination of brand and MPN clearly specifies one product. Required for all items -
-                                        except clothing, media, and custom made goods or if you\'re providing \'brand\' and \'gtin\'.').'</p>
-			  </div>
-          <label>'.$this->l('Global Trade Item Numbers').'</label>
-			  <div class="margin-form">
-				<input type="radio" name="gtin" id="gtin_0" value="ean13" '.($this->gtin_field == 'ean13' ? 'checked="checked" ' : '').' > EAN13</option>
-				<input type="radio" name="gtin" id="gtin_1" value="upc" '.($this->gtin_field == 'upc' ? 'checked="checked" ' : '').' > UPC</option>
-            <input type="radio" name="gtin" id="gtin_2" value="isbn10" '.($this->gtin_field == 'isbn10' ? 'checked="checked" ' : '').' > ISBN-10</option>
-            <input type="radio" name="gtin" id="gtin_3" value="isbn13" '.($this->gtin_field == 'isbn13' ? 'checked="checked" ' : '').' > ISBN-13</option>
-            <input type="radio" name="gtin" id="gtin_4" value="jan8" '.($this->gtin_field == 'jan8' ? 'checked="checked" ' : '').' > JAN (8-digit)</option>
-            <input type="radio" name="gtin" id="gtin_5" value="jan13" '.($this->gtin_field == 'jan13' ? 'checked="checked" ' : '').' > JAN (13-digit)</option>
-            <input type="radio" name="gtin" id="gtin_6" value="none" '.($this->gtin_field == 'none' ? 'checked="checked" ' : '').' > None</option>
-            <p class="clear">'.$this->l('Choose the identifier most suitable for your region and/or products. These identifiers are UPC (in North America),
-                                        EAN (in Europe), JAN (in Japan) and ISBN (for books). JAN and ISBN numbers should be entered in the
-                                        Prestashop EAN field. You can include any of these values within this attribute:').'</p>
-            <ul>
-            <li>'.$this->l('UPC: 12-digit number such as 001234567891').'</li>
-            <li>'.$this->l('EAN: 13-digit number such as 1001234567891').'</li>
-            <li>'.$this->l('JAN: 8 or 13-digit number such as 12345678 or 1234567890123').'</li>
-            <li>'.$this->l('ISBN: 10 or 13-digit number such as 0451524233. If you have both, only include 13-digit number.').'</li>
-            </ul>
-            <p class="clear">'.$this->l('Required for all items - except for clothing and custom made goods, or if you\'re providing \'brand\' and \'mpn\'.').'</p>
-			  </div>
-          <p style="font-size: smaller;"><img src="../img/admin/unknown.gif" alt="" class="middle" />'.
-            $this->l('<strong>Remember to click below to save any changes made before running the feed.</strong>').
-            '</p>
-          <input name="btnUpdate" id="btnUpdate" class="button" value="'.$this->l('Update Settings').'" type="submit" />
-					</fieldset>
-				</form><br/>';
-	}
-	
-	private function _postValidation()
-	{
-		// TODO Need to review form validation.....
-		// Used $_POST here to allow us to modify them directly - naughty I know :)
-  
-		if (empty($_POST['description']) OR strlen($_POST['description']) > 10000)
-			$this->_mod_errors[] = $this->l('Description is invalid');
-		// could check that this is a valid path, but the next test will
-		// do that for us anyway
-		// But first we need to get rid of the escape characters
-		$_POST['filepath'] = $this->winFixFilename($_POST['filepath']);
-		if (empty($_POST['filepath']) OR (strlen($_POST['filepath']) > 255))
-			$this->_mod_errors[] = $this->l('The target location is invalid');
-  
-		if (file_exists($_POST['filepath']) && !is_writable($_POST['filepath']))
-			$this->_mod_errors[] = $this->l('File error.<br />Cannot write to').' '.$_POST['filepath'];
-	}
-	
-	function getContent()
-	{
-		$this->_html .= '<h2>'.$this->l('[BETA]Google Base Products Feed').' {compat='.$this->_compat.'}</h2>';
-		if(!is_writable(realpath($this->directory())))
-			$this->_warnings[] = $this->l('Output directory must be writable or the feed file will need to be pre-created with write permissions.');
-  
-		if(isset($this->_warnings) AND sizeof($this->_warnings))
-		{
-		  $this->_displayWarnings($this->_warnings);
-		}
-  
-		if (Tools::getValue('btnUpdate'))
-		{
-			$this->_postValidation();
-  
-			if (!sizeof($this->_mod_errors))
-			{
-				Configuration::updateValue($this->name.'_description', Tools::getValue('description'));
-				Configuration::updateValue($this->name.'_filepath', addslashes($_POST['filepath'])); // the Tools class kills the windows file name separators :(
-				Configuration::updateValue($this->name.'_gtin', Tools::getValue('gtin'));	// gtin field selection
-				Configuration::updateValue($this->name.'_use_supplier', (int)(Tools::isSubmit('use_supplier')));
-				Configuration::updateValue($this->name.'_currency', (int)Tools::getValue('currency')); // Feed currency
-				Configuration::updateValue($this->name.'_lang', (int)Tools::getValue('language'));	// language to generate feed for
-        Configuration::updateValue($this->name.'_country', Tools::getValue('country'));
-        // A little fix just in case the % sign gets added....
-        Configuration::updateValue($this->name.'_default_tax', str_replace('%','',Tools::getValue('default_tax')));
-        Configuration::updateValue($this->name.'_ignore_tax', (int)(Tools::isSubmit('ignore_tax')));
-        Configuration::updateValue($this->name.'_ignore_shipping', (int)(Tools::isSubmit('ignore_shipping')));
-  
-				$this->_getGlobals();
-			} else {
-				if (isset($this->_mod_errors) AND sizeof($this->_mod_errors)) {
-					$this->_displayErrors($this->_mod_errors);
-				}
-			}
-		} else if (Tools::getValue('btnSubmit')) {
-			// Go try and generate the feed
-			$this->_postProcess();
-		}
-  
-		$this->_displayForm();
-		$this->_displayFeed();
-  
-		return $this->_html;
-	}
-	
-	public function	_displayWarnings($warn)
-	{
-		$str_output = '';
-		if (!empty($warn)) {
-			$str_output .= '<script type="text/javascript">
-					$(document).ready(function() {
-						$(\'#linkSeeMore\').unbind(\'click\').click(function(){
-							$(\'#seeMore\').show(\'slow\');
-							$(this).hide();
-							$(\'#linkHide\').show();
-							return false;
-						});
-						$(\'#linkHide\').unbind(\'click\').click(function(){
-							$(\'#seeMore\').hide(\'slow\');
-							$(this).hide();
-							$(\'#linkSeeMore\').show();
-							return false;
-						});
-						$(\'#hideWarn\').unbind(\'click\').click(function(){
-							$(\'.warn\').hide(\'slow\', function (){
-								$(\'.warn\').remove();
-							});
-							return false;
-						});
-					});
-				  </script>
-			<div class="warn">';
-			if (!is_array($warn))
-				$str_output .= '<img src="../img/admin/warn2.png" />'.$warn;
-			else
-			{	$str_output .= '<span style="float:right"><a id="hideWarn" href=""><img alt="X" src="../img/admin/close.png" /></a></span><img src="../img/admin/warn2.png" />'.
-				(count($warn) > 1 ? $this->l('There are') : $this->l('There is')).' '.count($warn).' '.(count($warn) > 1 ? $this->l('warnings') : $this->l('warning'))
-				.'<span style="margin-left:20px;" id="labelSeeMore">
-				<a id="linkSeeMore" href="#" style="text-decoration:underline">'.$this->l('Click here to see more').'</a>
-				<a id="linkHide" href="#" style="text-decoration:underline;display:none">'.$this->l('Hide warning').'</a></span><ul style="display:none;" id="seeMore">';
-				foreach($warn as $val)
-					$str_output .= '<li>'.$val.'</li>';
-				$str_output .= '</ul>';
-			}
-			$str_output .= '</div>';
-		}
-		echo $str_output;
-	}
-	
-	/**
-	 * Display errors
-	 */
-	public function _displayErrors()
-	{
-		if ($nbErrors = count($this->_mod_errors))
-		{
-			echo '<script type="text/javascript">
-				$(document).ready(function() {
-					$(\'#hideError\').unbind(\'click\').click(function(){
-						$(\'.error\').hide(\'slow\', function (){
-							$(\'.error\').remove();
-						});
-						return false;
-					});
-				});
-			  </script>
-			<div class="error"><span style="float:right"><a id="hideError" href=""><img alt="X" src="../img/admin/close.png" /></a></span><img src="../img/admin/error2.png" />';
-			if (count($this->_mod_errors) == 1)
-				echo $this->_mod_errors[0];
-			else
-			{
-				echo $nbErrors.' '.$this->l('errors').'<br /><ol>';
-				foreach ($this->_mod_errors AS $error)
-					echo '<li>'.$error.'</li>';
-				echo '</ol>';
-			}
-			echo '</div>';
-		}
-	}
-	
-	public function getAvailability($product)
-	{
-		if ($product["quantity"]> 0)
-			return $this->l('in stock');
-    else if ( self::checkQty($product,1))
-			return $this->l('available for order');
-		else
-			return $this->l('out of stock');
-	}
-	
-	public function getCurrencies($object = true, $active = 1)
-	{
-		switch ($this->_compat) {
-			case '14':
-				$tab = Db::getInstance()->ExecuteS('
-							SELECT *
-							FROM `'._DB_PREFIX_.'currency`
-							WHERE `deleted` = 0
-							'.($active == 1 ? 'AND `active` = 1' : '').'
-							ORDER BY `name` ASC');
-			break;
-			default:
-				$tab = Db::getInstance()->ExecuteS('
-							SELECT *
-							FROM `'._DB_PREFIX_.'currency`
-							WHERE `deleted` = 0
-							ORDER BY `name` ASC');
-			break;
-		}
-  
-		if ($object)
-			foreach ($tab as $key => $currency)
-				$tab[$currency['id_currency']] = Currency::getCurrencyInstance($currency['id_currency']);
-		return $tab;
-	}
-	
-	public function getLanguages()
-	{
-		$languages = array();
-	
-		$result = Db::getInstance()->ExecuteS("
-						SELECT `id_lang`, `name`, `iso_code`, `active`
-						FROM `"._DB_PREFIX_."lang` WHERE `active` = '1'");
-	
-		foreach ($result AS $row)
-			  $languages[(int)($row['id_lang'])] = array('id_lang' => (int)($row['id_lang']), 'name' => $row['name'], 'iso_code' => $row['iso_code'], 'active' => (int)($row['active']));
-		
-		return $languages;
-	}
-	
-	private function checkQty($product, $qty)	// copied and amended form classes/Product.php
-	{
-		if (Pack::isPack((int)$product['id_product']) && !Pack::isInStock((int)$product['id_product']))
-			return false;
-
-		if (Product::isAvailableWhenOutOfStock(StockAvailable::outOfStock($product['id_product'])))
-			return true;
-
-//		if (isset($this->id_product_attribute))
-//			$id_product_attribute = $this->id_product_attribute;
-//		else
-			$id_product_attribute = 0;
-
-		return ($qty <= StockAvailable::getQuantityAvailableByProduct($product['id_product'], $id_product_attribute));
 	}
 }
