@@ -17,6 +17,13 @@ Apparel and some other product types really need to be able to list the variants
 CHANGELOG
 -------------
 
+12/02/2013
+-------------
+
+- Unchecking "Use Supplier Reference" enables the use of "Reference" instead for MPN (https://github.com/paulc010/googlebase/issues/1)
+  NOTE: This may behave unpredictably for products with "Combinations"
+- Bug fixes to warnings variable
+
 11/02/2013
 -------------
 
