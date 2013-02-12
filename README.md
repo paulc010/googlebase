@@ -26,6 +26,7 @@ CHANGELOG
   NOTE: This may behave unpredictably for products with "Combinations"
 - Bug fixes to warnings variable
 - Change price calculation to reflect default customer group tax settings (include/exclude tax setting)
+- Added cron facility for Prestashop 1.5
 
 11/02/2013
 -------------
