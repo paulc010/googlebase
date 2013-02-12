@@ -35,7 +35,7 @@ class GoogleBase extends Module
 		$this->tab = $this->_compat > 13 ? 'advertising_marketing' : 'Tools';
 		if ($this->_compat > 13)
 			$this->author = 'eCartService.net';
-		$this->version = '0.8';
+		$this->version = '0.9';
 		$this->need_instance = 0;
 		
 		parent::__construct();
@@ -260,10 +260,22 @@ class GoogleBase extends Module
 		
 			foreach ($products AS $product) {
 			 	if ($product['active']) {
-					$items .= "<item>\n";
 					//echo '<pre>'.print_r($product, true).'</pre>';
-					$items .= $this->_processProduct($product);
-					$items .= "</item>\n\n";
+					//echo '<h2>Product Id: '.$product['id_product'].'</h2><pre>'.print_r(Product::getProductAttributesIds($product['id_product']), true).'</pre>';
+					
+					// We need to check whether we need to loop for product variants
+					$combinations = Product::getProductAttributesIds($product['id_product']);
+					if (empty($combinations)) {
+						$items .= "<item>\n";
+						$items .= $this->_processProduct($product);
+						$items .= "</item>\n\n";
+					} else {
+						foreach ($combinations as $combination) {
+							$items .= "<item>\n";
+							$items .= $this->_processProduct($product, $combination['id_product_attribute']);
+							$items .= "</item>\n\n";
+						}
+					}
 				}
 			}
 			$this->_addToFeed( "$items</channel>\n</rss>\n" );
@@ -287,10 +299,10 @@ class GoogleBase extends Module
 		 return ($string);
 	}
 	
-	private function _xmlElement($name, $value, $encoding = false)
+	private function _xmlElement($name, $value, $encoding = false, $force_zero = false, $integer = false)
 	{
 		$element = '';
-		if (!empty($value)) {
+    if ((!empty($value) && !($integer && (int)$value==0)) || $force_zero) {
 			if ($encoding)
 				$value = $this->_xmlentities($value);
 			$element .= "<".$name.">".$value."</".$name.">\n";
@@ -298,18 +310,34 @@ class GoogleBase extends Module
 		return $element;
 	}
 	
-	private function _processProduct($product)
+	private function _processProduct($product, $id_product_attribute = 0)
 	{
 		$item_data = '';
-		$product_link = $this->_getCompatibleProductLink($product);
+		if ($id_product_attribute) {
+			$variant = new Combination($id_product_attribute);
+		} else {
+			$variant = '';
+		}
+		$product_link = $this->_getCompatibleProductLink($product, $variant);
 		$image_links = $this->_getCompatibleImageLinks($product);
 		
 		// Reference page: http://www.google.com/support/merchants/bin/answer.py?answer=188494
 		
 		// 1. Basic Product Information
 		
-		$item_data .= $this->_xmlElement('g:id',"pc".$this->lang_iso."-".$product['id_product']);
-		$item_data .= $this->_xmlElement('title',$product['name'], true);
+		$item_data .= $this->_xmlElement('g:id',"pc".$this->lang_iso."-".$product['id_product'].'-'.$id_product_attribute);
+		if (is_object($variant)) {
+			$item_data .= $this->_xmlElement('g:item_group_id', "pc".$this->lang_iso."-".$product['id_product']);
+			$variant_labels = $variant->getAttributesName($this->id_lang);
+			$variant_name = $product['name']. ' (';
+			foreach ($variant_labels as $label) {
+				$variant_name .= ' '.$label['name'];
+			}
+			$variant_name = $variant_name.' )';
+			$item_data .= $this->_xmlElement('title',$variant_name, true);
+		} else {
+			$item_data .= $this->_xmlElement('title',$product['name'], true);
+		}
 		
 		// Try our best to get a decent description
 		$description = trim(strip_tags(strlen($product['description_short']) ? $product['description_short'] :  $product['description'] ));
@@ -317,7 +345,6 @@ class GoogleBase extends Module
 		$description = preg_replace('/[^\x0A\x0D\x20-\x7F]/',"", $description);
 		$item_data .= $this->_xmlElement('description','<![CDATA['.$description.']]>');
 		// google product category <g:google_product_category /> - Google's category of the item (TODO: support this!)
-		
 		
 		$item_data .= $this->_xmlElement('g:product_type',$this->getPath($product['id_category_default']));
 		$item_data .= $this->_xmlElement('link',$product_link, true);
@@ -332,12 +359,12 @@ class GoogleBase extends Module
 			$item_data .= $this->_xmlElement('g:condition',$this->_getCompatibleCondition($this->default_condition));
 		
 		// 2. Availability & Price
-		$item_data .= $this->_xmlElement('g:availability',$this->getAvailability($product));
+		$item_data .= $this->_xmlElement('g:availability',$this->getAvailability($product, $id_product_attribute));
 		// Price is WITHOUT any reduction
-		$price = $this->_getCompatiblePrice($product['id_product']);
+		$price = $this->_getCompatiblePrice($product['id_product'], $id_product_attribute);
 		$item_data .= $this->_xmlElement('g:price', $price);
 		// TODO: If there is an active discount, then include it
-		$price_with_reduction = $this->_getCompatibleSalePrice($product['id_product']);
+		$price_with_reduction = $this->_getCompatibleSalePrice($product['id_product'], $id_product_attribute);
 		if ($price_with_reduction !== $price)
 			$item_data .= $this->_xmlElement('g:sale_price',$price_with_reduction);
 		/*
@@ -348,16 +375,20 @@ class GoogleBase extends Module
 		// 3. Unique Product Identifiers
 		if ($product['manufacturer_name'])
 			$item_data .= $this->_xmlElement('g:brand',$product['manufacturer_name'], true);
-		if ($this->gtin_field == 'ean13' && !empty($product['ean13']))
-			$item_data .= $this->_xmlElement('g:gtin', sprintf('%1$013d',$product['ean13']));
-		else if ($this->gtin_field == 'upc' && !empty($product['upc']))
-			$item_data .= $this->_xmlElement('g:gtin',sprintf('%1$012d',$product['upc']));
+		
+		// gtin value
+		$item_data .= $this->_xmlElement('g:gtin', $this->_getGtinValue($product, $variant));
+		
 		if ($this->_compat < 15) {
 			if ($this->use_supplier && !empty($product['supplier_reference']));
 				$item_data .= $this->_xmlElement('g:mpn',$product['supplier_reference']);
 		} else {
-			if (isset($product['id_supplier']) && !empty($product['id_supplier'])) {
-				$item_data .= $this->_xmlElement('g:mpn',ProductSupplier::getProductSupplierReference($product['id_product'], 0, $product['id_supplier']));
+			if (isset($product['id_supplier']) && !empty($product['id_supplier']) || (is_object($variant) && !empty($variant->supplier_reference))) {
+				if (!is_object($variant)) {
+					$item_data .= $this->_xmlElement('g:mpn',ProductSupplier::getProductSupplierReference($product['id_product'], 0, $product['id_supplier']));
+				} else {
+					$item_data .= $this->_xmlElement('g:mpn', $variant->supplier_reference);
+				}
 			}
 		}
 		
@@ -367,6 +398,36 @@ class GoogleBase extends Module
 			$item_data .= $this->_xmlElement('g:online_only',$product['online_only'] == 1 ? 'y' : 'n');
 		
 		return $item_data;
+	}
+	
+	private function _getGtinValue($product, $variant = null)
+	{
+		if (!is_object($variant)) {
+			$ean13 = $product['ean13'];
+			$upc = $product['upc'];
+		} else {
+			$ean13 = $variant->ean13;
+			$upc = $variant->upc;
+		}
+		
+		$gtin = '';
+	
+		switch ($this->gtin_field) {
+			case 'isbn10':
+			case 'isbn13':
+			case 'jan8':
+			case 'jan13':
+			case 'ean13':
+				$gtin = $ean13;
+			break;
+			case 'upc':
+				$gtin = $upc;
+			break;
+			case 'none':
+				$gtin = '';
+			break;
+		}
+		return $gtin;
 	}
 	
 	private function _getCompatibleCondition($condition)
@@ -448,7 +509,7 @@ class GoogleBase extends Module
 		return $image_data;
 	}
 	
-	private function _getCompatibleProductLink($product)
+	private function _getCompatibleProductLink($product, $variant = null)
 	{
 		if ($this->_compat > 14) {
 			$link = $this->context->link;
@@ -717,8 +778,9 @@ class GoogleBase extends Module
 		}
 	}
 	
-	public function getAvailability($product)
+	public function getAvailability($product, $id_product_attribute  = 0)
 	{
+		// TODO: Need to check on actual variant availability
 		if ($product["quantity"]> 0)
       return $this->l('in stock');
     else if ( self::checkQty($product,1))
