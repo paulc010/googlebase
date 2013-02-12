@@ -14,7 +14,11 @@ if (!defined('_PS_BASE_URL_SSL_'))
 	define('_PS_BASE_URL_SSL_', Tools::getShopDomainSsl(true));
 
 $context = Context::getContext();
-$context->link = new Link();
+
+$protocol_link = (Configuration::get('PS_SSL_ENABLED')) ? 'https://' : 'http://';
+$protocol_content = (isset($useSSL) AND $useSSL AND Configuration::get('PS_SSL_ENABLED')) ? 'https://' : 'http://';
+
+$context->link = new Link($protocol_link, $protocol_content);
 $context->employee = new Employee();
 $context->controller = new ModuleFrontController();
 
