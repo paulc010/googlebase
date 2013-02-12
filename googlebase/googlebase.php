@@ -303,8 +303,8 @@ class GoogleBase extends Module
 		} else {
 			$variant = '';
 		}
-		$product_link = $this->_getCompatibleProductLink($product, $variant);
-		$image_links = $this->_getCompatibleImageLinks($product);
+		$product_link = $this->_getProductLink($product, $variant);
+		$image_links = $this->_getImageLinks($product);
 		
 		// Reference page: http://www.google.com/support/merchants/bin/answer.py?answer=188494
 		
@@ -329,6 +329,7 @@ class GoogleBase extends Module
 		// Remove invalid characters that may have been inserted incorrectly
 		$description = preg_replace('/[^\x0A\x0D\x20-\x7F]/',"", $description);
 		$item_data .= $this->_xmlElement('description','<![CDATA['.$description.']]>');
+		
 		// google product category <g:google_product_category /> - Google's category of the item (TODO: support this!)
 		
 		$item_data .= $this->_xmlElement('g:product_type',$this->getPath($product['id_category_default']));
@@ -338,15 +339,15 @@ class GoogleBase extends Module
 		if ($image_links[1]['valid'] == 1)
 			$item_data .= $this->_xmlElement('g:additional_image_link',$image_links[1]['link'], true);
 		
-		$item_data .= $this->_xmlElement('g:condition', $this->_getCompatibleCondition($product['condition']));
+		$item_data .= $this->_xmlElement('g:condition', $this->_getCondition($product['condition']));
 		
 		// 2. Availability & Price
 		$item_data .= $this->_xmlElement('g:availability',$this->getAvailability($product, $id_product_attribute));
 		// Price is WITHOUT any reduction
-		$price = $this->_getCompatiblePrice($product['id_product'], $id_product_attribute);
+		$price = $this->_getPrice($product['id_product'], $id_product_attribute);
 		$item_data .= $this->_xmlElement('g:price', $price);
 		// TODO: If there is an active discount, then include it
-		$price_with_reduction = $this->_getCompatibleSalePrice($product['id_product'], $id_product_attribute);
+		$price_with_reduction = $this->_getSalePrice($product['id_product'], $id_product_attribute);
 		if ($price_with_reduction !== $price)
 			$item_data .= $this->_xmlElement('g:sale_price',$price_with_reduction);
 		/*
@@ -406,7 +407,7 @@ class GoogleBase extends Module
 		return $gtin;
 	}
 	
-	private function _getCompatibleCondition($condition)
+	private function _getCondition($condition)
 	{
 		switch ($condition) {
 			case 'new':
@@ -422,22 +423,23 @@ class GoogleBase extends Module
 		return $condition;
 	}
 	
-	private function _getCompatiblePrice($id_product, $id_product_attrib = NULL)
+	private function _getPrice($id_product, $id_product_attrib = NULL)
 	{
 		$price = number_format(Tools::convertPrice(Product::getPriceStatic(intval($id_product), true, $id_product_attrib, 6, NULL, false, false), $this->currencies[$this->id_currency]), 2, '.', '');
 		
 		return $price.' '.$this->currencies[$this->id_currency]->iso_code;
 	}
 	
-	private function _getCompatibleSalePrice($id_product, $id_product_attrib = NULL)
+	private function _getSalePrice($id_product, $id_product_attrib = NULL)
 	{
 		$price = number_format(Tools::convertPrice(Product::getPriceStatic(intval($id_product), true, $id_product_attrib, 6), $this->currencies[$this->id_currency]), 2, '.', '');
 		
 		return $price.' '.$this->currencies[$this->id_currency]->iso_code;
 	}
 	
-	private function _getCompatibleImageLinks($product)
+	private function _getImageLinks($product, $variant = null)
 	{
+		// $variant->getCombinationImages($id_lang);
 		$image_data = array(array('link' => '', 'valid' => 0), array('link' => '', 'valid' => 0));
 		$images = Image::getImages($this->id_lang, $product['id_product']);
 		
@@ -453,9 +455,14 @@ class GoogleBase extends Module
 		return $image_data;
 	}
 	
-	private function _getCompatibleProductLink($product, $variant = null)
+	private function _getProductLink($product, $variant = null)
 	{
-		return $this->context->link->getProductLink($product, null, null, null, (int)$this->id_lang);
+		$variant_anchor = '';
+		if (is_object($variant)) {
+			$product_object = new Product($product['id_product']);
+			$variant_anchor = $product_object->getAnchor($variant->id);
+		}
+		return $this->context->link->getProductLink($product, null, null, null, (int)$this->id_lang).$variant_anchor;
 	}
 	
 	private function _displayFeed()
@@ -621,7 +628,7 @@ class GoogleBase extends Module
 		return $this->_html;
 	}
 	
-	public function	_displayWarnings($warn)
+	private function	_displayWarnings($warn)
 	{
 		$str_output = '';
 		if (!empty($warn)) {
@@ -668,7 +675,7 @@ class GoogleBase extends Module
 	/**
 	 * Display errors
 	 */
-	public function _displayErrors()
+	private function _displayErrors()
 	{
 		if ($nbErrors = count($this->_mod_errors))
 		{
