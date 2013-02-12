@@ -624,9 +624,9 @@ class GoogleBase extends Module
 					<p>
 						<b>'.$domain.__PS_BASE_URI__.'modules/googlebase/googlebase-cron.php?token='.substr(Tools::encrypt('googlebase/cron'),0,10).'&module=googlebase</b>
 					</p>
-					</fieldset>
-				</form><br/>';
+					</fieldset>';
 				}
+				$this->_html .= '</form><br/>';
 	}
 	
 	private function _postValidation()
