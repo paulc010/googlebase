@@ -14,6 +14,8 @@ Known Major Issues
 
 Apparel and some other product types really need to be able to list the variants as unique items in the feed. This is not currently supported.
 
+See https://github.com/paulc010/googlebase/tree/beta for a 1.5.3 specific version that implements "variants" using product combinations.
+
 CHANGELOG
 -------------
 
