@@ -21,11 +21,18 @@ class GoogleBase extends Module
 	private $use_supplier;
 	private $nearby; // Not supported yet. Needs config option
 
+	/**
+	* GoogleBase module constructor
+	*
+	* Performs standard module initialisation
+	* 
+	*/
 	public function __construct()
 	{
+		// Determine major Prestashop release (only used for debug)
 		$version_mask = explode('.', _PS_VERSION_, 3);
-		
 		$this->_compat = (int)($version_mask[0]*10)+$version_mask[1];
+		
 		$this->_warnings = array();
 		$this->_mod_errors = array();
 		
@@ -57,12 +64,21 @@ class GoogleBase extends Module
 		$this->description = $this->l('Generate your products feed for Google Products Search. www.ecartservice.net');
 	}
 
+	/**
+	* Module installer
+	*
+	* @return bool Success/failure
+	*/
 	public function install()
 	{
 		$this->_setDefaults();
 		return parent::install();
 	}
 
+	/**
+	* Initialise the configuration variables and transient class data 
+	*
+	*/
 	private function _setDefaults()
 	{
 		if (!Configuration::get($this->name.'_description'))
@@ -79,12 +95,21 @@ class GoogleBase extends Module
 		$this->_getGlobals();
 	
 		if (!Configuration::get($this->name.'_filepath'))
-			Configuration::updateValue($this->name.'_filepath', addslashes($this->defaultOutputFile()));
+			Configuration::updateValue($this->name.'_filepath', addslashes($this->_defaultOutputFile()));
 	
 		// TODO: Needs config option to turn on/off. Currently off.
 		$this->_nearby = false;
 	}
 
+	/**
+	* Initialise global environment settings
+	*
+	* At various points the feed required language and currency settings.
+	* These may obviously be changed outwith the module so we need to do a check
+	* and reset as appropriate. Also initialises language and currency lists for the config screen.
+	*
+	* @param	string	Target directory for the generated HTML Files
+	*/
 	private function _getGlobals()
 	{
 		$this->xml_description = Configuration::get($this->name.'_description');
@@ -120,21 +145,39 @@ class GoogleBase extends Module
 	  
 	}
 
-	private function directory()
+	/**
+	* Shorthand to work out the __PS_BASE_URI__ directory
+	*
+	* @return string The real path of the base installation directory
+	*/
+	private function _directory()
 	{
-		return dirname(__FILE__).'/../../'; // move up to the __PS_BASE_URI__ directory
+		return realpath(dirname(__FILE__).'/../../'); // move up to the __PS_BASE_URI__ directory
 	}
 
-
-	private function winFixFilename($file)
+	/**
+	* Fix windows filenames
+	*
+	* When used on a Windows server the filenames get mangled.
+	* This is just a hack to undo the changes to the config variable.
+	*
+	* @param	string	$file		filename to "fix"
+	* @return		string	The fixed filename
+	*/
+	private function _winFixFilename($file)
 	{
 		return str_replace('\\\\','\\',$file);
 	}
 
-	private function defaultOutputFile()
+	/**
+	* Determine a sane default for the output file
+	*
+	* @return		string		The defult location of the output file
+	*/
+	private function _defaultOutputFile()
 	{
 		// PHP on windows seems to return a trailing '\' where as on unix it doesn't
-		$output_dir = realpath($this->directory());
+		$output_dir = $this->_directory();
 		$dir_separator = '/';
 
 		// If there's a windows directory separator on the end,
@@ -145,40 +188,33 @@ class GoogleBase extends Module
 		$output_file = $output_dir.$dir_separator.$this->lang_iso.'_'.strtolower($this->currencies[$this->id_currency]->iso_code).'_googlebase.xml';
 		return $output_file;
 	}
-
-	static private $cacheCat = array();
-	private function _getrawCatRewrite($id_cat)
-	{
-		if (!isset(self::$cacheCat[$id_cat])) {
-			$row = Db::getInstance(_PS_USE_SQL_SLAVE_)->getRow("
-					SELECT `link_rewrite`
-					FROM `"._DB_PREFIX_."category_lang`
-					WHERE `id_category` = '".(int)($id_cat)."' AND
-					`id_lang` = '".(int)$this->id_lang."'");
-		
-			if ($row)
-			{
-				self::$cacheCat[$id_cat] = $row['link_rewrite'];
-				return self::$cacheCat[$id_cat];
-			}
-			else
-			{
-				self::$cacheCat[$id_cat] = '';
-				$this->errors[] = $this->l('Error processing category with id='.$id_cat);
-			}
-		}
-		return self::$cacheCat[$id_cat];
-	}
 	
+	/**
+	* Produce a human readable "breadcrumb" path
+	*
+	* Multiple line detailed description.
+	* The handling of line breaks and HTML is up to the renderer.
+	* Order: short description - detailed description - doc tags.
+	*
+	* @param	int	 $id_cat Id of category to process
+	* @return		string				The path
+	*/
 	static private $cacheCatPath = array();
-	private function getPath($id_cat)
+	public function getPath($id_cat)
 	{
 		if (!isset(self::$cacheCatPath[$id_cat]))
 			self::$cacheCatPath[$id_cat] = $this->_getPath($id_cat);
 	  
 		return self::$cacheCatPath[$id_cat];
 	}
-	
+
+	/**
+	* Recursive function to generate category path 
+	*
+	* @param	int	 $id_category The category id currently being processed
+	* @param string $path The current category path
+	* @return string					The resulting full category path
+	*/
 	private function _getPath($id_category, $path = '')
 	{
 		$category = new Category(intval($id_category), intval(Configuration::get($this->name.'_lang')));
@@ -200,11 +236,15 @@ class GoogleBase extends Module
 		return $this->_getPath(intval($category->id_parent), $path);
 	}
 	
-	private function file_url()
+	/**
+	* Create a url to access the generated feed
+	*
+	* @return		string	The url to the feed file
+	*/
+	private function _file_url()
 	{
-		$filename = $this->winFixFilename(Configuration::get($this->name.'_filepath'));
-		$root_path = realpath($this->directory());
-		$file = str_replace($root_path,'', $filename);
+		$filename = $this->_winFixFilename(Configuration::get($this->name.'_filepath'));
+		$file = str_replace($this->_directory(),'', $filename);
   
 		$separator = '';
   
@@ -217,9 +257,18 @@ class GoogleBase extends Module
 		return 'http://'.$_SERVER['HTTP_HOST'].$separator.$file;
 	}
 	
+	/**
+	* Write arbitrary text out to the feed file
+	*
+	* Multiple line detailed description.
+	* The handling of line breaks and HTML is up to the renderer.
+	* Order: short description - detailed description - doc tags.
+	*
+	* @param	string	$str Text to write to the feed file
+	*/
 	private function _addToFeed($str)
 	{
-		$filename = $this->winFixFilename(Configuration::get($this->name.'_filepath'));
+		$filename = $this->_winFixFilename(Configuration::get($this->name.'_filepath'));
 		if(file_exists($filename))
 		{
 			$fp = fopen($filename, 'ab');
@@ -227,13 +276,26 @@ class GoogleBase extends Module
 			fclose($fp);
 		}
 	}
+
+	/**
+	* Public create feed method for cron script
+	*
+	*/
+	public function do_crontask() {
+		$this->_postProcess(true);
+	}
 	
-	private function _postProcess()
+	/**
+	* Create the product feed
+	*
+	* The main core of the module, responsible for creating the feed and associated product entries
+	*/	
+	private function _postProcess($cron = false)
 	{
 		$products = Product::getProducts($this->id_lang, 0, NULL, 'id_product', 'ASC');
   
 		if ($products) {
-			if (!$fp = fopen($this->winFixFilename(Configuration::get($this->name.'_filepath')), 'w')) {
+			if (!$fp = fopen($this->_winFixFilename(Configuration::get($this->name.'_filepath')), 'w')) {
 				$this->_mod_errors[] = $this->l('Error writing to feed file.');
 				return;
 			}
@@ -271,13 +333,21 @@ class GoogleBase extends Module
 			$this->_addToFeed( "$items</channel>\n</rss>\n" );
 		}
   
-		$res = file_exists($this->winFixFilename(Configuration::get($this->name.'_filepath')));
-		if ($res)
-			$this->_html .= '<h3 class="conf confirm" style="margin-bottom: 20px">'.$this->l('Feed file successfully generated').'</h3>';
-		else
-			$this->_mod_errors[] = $this->l('Error while creating feed file');
+		if (!$cron) {
+			$res = file_exists($this->_winFixFilename(Configuration::get($this->name.'_filepath')));
+			if ($res)
+				$this->_html .= '<h3 class="conf confirm" style="margin-bottom: 20px">'.$this->l('Feed file successfully generated').'</h3>';
+			else
+				$this->_mod_errors[] = $this->l('Error while creating feed file');
+		}
 	}
-	
+
+	/**
+	* Convert entities 
+	*
+	* @param	string	$string The string to process
+	* @return		string						The processed string
+	*/	
 	private function _xmlentities($string)
 	{
 		$string = str_replace('&', '&amp;', $string);
@@ -288,7 +358,17 @@ class GoogleBase extends Module
 		$string = str_replace('>', '&gt;', $string);
 		 return ($string);
 	}
-	
+
+	/**
+	* Format name:value into an XML element format
+	*
+	* @param	string	$name The element name
+	* @param	string	$value  The value for the element
+	* @param	bool 		$encoding Whether to encode entities
+	* @param 	bool 		$force_zero Decide whether "zero" is a valid value for this element (otherwise omit whole element)
+	* @param 	bool			$integer Treat value as an integer for special handling
+	* @return		string							The formatted XML element
+	*/	
 	private function _xmlElement($name, $value, $encoding = false, $force_zero = false, $integer = false)
 	{
 		$element = '';
@@ -299,7 +379,13 @@ class GoogleBase extends Module
 		}
 		return $element;
 	}
-	
+
+	/**
+	* Process a single product (or variant)
+	*
+	* @param	array	$product										The data associated with the product from the database
+	* @param	int			$id_product_attribute		A variant id or 0 if product has no combinations
+	*/	
 	private function _processProduct($product, $id_product_attribute = 0)
 	{
 		$item_data = '';
@@ -388,7 +474,14 @@ class GoogleBase extends Module
 		
 		return $item_data;
 	}
-	
+
+	/**
+	* Fetch the Global Trade Identifier as configured for the module
+	*
+	* @param	array		$product	The data associated with the product from the database
+	* @param	object	$variant		Specific data associated with a product variant
+	* @return		mixed								The value to use
+	*/	
 	private function _getGtinValue($product, $variant = null)
 	{
 		if (!is_object($variant)) {
@@ -419,6 +512,12 @@ class GoogleBase extends Module
 		return $gtin;
 	}
 	
+	/**
+	* Wrapper to translate condition data element
+	*
+	* @param	string	$condition	The text for the condition
+	* @return		string									The translated condition
+	*/
 	private function _getCondition($condition)
 	{
 		switch ($condition) {
@@ -435,6 +534,13 @@ class GoogleBase extends Module
 		return $condition;
 	}
 	
+	/**
+	* Get the standard price of a specific product or variant
+	*
+	* @param	int			The product id
+	* @param	int			The attribute (variant) id
+	* @return		float	The price
+	*/
 	private function _getPrice($id_product, $id_product_attrib = NULL)
 	{
 		$price = number_format(Tools::convertPrice(Product::getPriceStatic(intval($id_product), true, $id_product_attrib, 6, NULL, false, false), $this->currencies[$this->id_currency]), 2, '.', '');
@@ -442,6 +548,13 @@ class GoogleBase extends Module
 		return $price.' '.$this->currencies[$this->id_currency]->iso_code;
 	}
 	
+	/**
+	* Get the sale price of a specific product or variant
+	*
+	* @param	int			The product id
+	* @param	int			The attribute (variant) id
+	* @return		float	The sale price
+	*/
 	private function _getSalePrice($id_product, $id_product_attrib = NULL)
 	{
 		$price = number_format(Tools::convertPrice(Product::getPriceStatic(intval($id_product), true, $id_product_attrib, 6), $this->currencies[$this->id_currency]), 2, '.', '');
@@ -449,8 +562,16 @@ class GoogleBase extends Module
 		return $price.' '.$this->currencies[$this->id_currency]->iso_code;
 	}
 	
+	/**
+	* Get links to images associated with the product or variant
+	*
+	* @param	array		$product	The data associated with the product from the database
+	* @param	object	$variant		Specific data associated with a product variant
+	* @return array									Array of image links
+	*/
 	private function _getImageLinks($product, $variant = null)
 	{
+		// TODO: use variant image if available
 		// $variant->getCombinationImages($id_lang);
 		$image_data = array(array('link' => '', 'valid' => 0), array('link' => '', 'valid' => 0));
 		$images = Image::getImages($this->id_lang, $product['id_product']);
@@ -467,6 +588,13 @@ class GoogleBase extends Module
 		return $image_data;
 	}
 	
+	/**
+	* Get product link
+	*
+	* @param	array		$product	The data associated with the product from the database
+	* @param	object	$variant		Specific data associated with a product variant
+	* @return		string								The product url
+	*/
 	private function _getProductLink($product, $variant = null)
 	{
 		$variant_anchor = '';
@@ -477,16 +605,21 @@ class GoogleBase extends Module
 		return $this->context->link->getProductLink($product, null, null, null, (int)$this->id_lang).$variant_anchor;
 	}
 	
+	/**
+	* Display details of generated feed in configure screen
+	*
+	* Adds html to the output variable
+	*/
 	private function _displayFeed()
 	{
-		$filename = $this->winFixFilename(Configuration::get($this->name.'_filepath'));
+		$filename = $this->_winFixFilename(Configuration::get($this->name.'_filepath'));
 		if(file_exists($filename)) {
 			$this->_html .= '<fieldset><legend><img src="../img/admin/enabled.gif" alt="" class="middle" />'.$this->l('Feed Generated').'</legend>';
-			if (strpos($filename,realpath($this->directory())) === FALSE)
+			if (strpos($filename,$this->_directory()) === FALSE)
 			{
 				$this->_html .= '<p>'.$this->l('Your Google Base feed file is available via ftp as the following:').' <b>'.$filename.'</b></p><br />';
 			} else {
-				$this->_html .= '<p>'.$this->l('Your Google Base feed file is online at the following address:').' <a href="'.$this->file_url().'"><b>'.$this->file_url().'</b></a></p><br />';
+				$this->_html .= '<p>'.$this->l('Your Google Base feed file is online at the following address:').' <a href="'.$this->_file_url().'"><b>'.$this->_file_url().'</b></a></p><br />';
 			}
 			$this->_html .= $this->l('Last Updated:').' <b>'.date('m.d.y G:i:s', filemtime($filename)).'</b><br />';
 			$this->_html .= '</fieldset>';
@@ -497,9 +630,13 @@ class GoogleBase extends Module
 		}
 	}
 	
+	/**
+	* Display the configuration form
+	*
+	* Adds html to the output variable 
+	*/
 	private function _displayForm()
 	{
-
 		$this->use_supplier = Configuration::get($this->name.'_use_supplier', 'on');
 		$this->gtin_field = Tools::getValue('gtin', Configuration::get($this->name.'_gtin'));
 		$this->currency = Tools::getValue('currency', Configuration::get($this->name.'_currency'));
@@ -554,8 +691,8 @@ class GoogleBase extends Module
 						</div>
 						<label>'.$this->l('Output Location: ').'</label>
 						<div class="margin-form">
-							<input name="filepath" type="text" style="width: 600px;" value="'.(isset($_POST['filepath']) ? $_POST['filepath'] : $this->winFixFilename(Configuration::get($this->name.'_filepath'))).'"/>
-							<p class="clear">'.$this->l('Recommended path:').' '.$this->defaultOutputFile().'</p>
+							<input name="filepath" type="text" style="width: 600px;" value="'.(isset($_POST['filepath']) ? $_POST['filepath'] : $this->_winFixFilename(Configuration::get($this->name.'_filepath'))).'"/>
+							<p class="clear">'.$this->l('Recommended path:').' '.$this->_defaultOutputFile().'</p>
 						</div>
 			  <fieldset class="space">
 							<p style="font-size: smaller;"><img src="../img/admin/unknown.gif" alt="" class="middle" />'.
@@ -577,7 +714,7 @@ class GoogleBase extends Module
 				<input type="radio" name="gtin" id="gtin_2" value="none" '.($this->gtin_field == 'none' ? 'checked="checked" ' : '').' > None</option>
 				<p class="clear">'.$this->l('Mandatory unless you specify the Manufacturer and MPN (see above). Either: EAN13 (EU) or UPC (US)').'</p>
 			  </div>
-			  <input name="btnUpdate" id="btnUpdate" class="button" value="'.((!file_exists($this->winFixFilename(Configuration::get($this->name.'_filepath')))) ? $this->l('Update Settings') : $this->l('Update Settings')).'" type="submit" />
+			  <input name="btnUpdate" id="btnUpdate" class="button" value="'.((!file_exists($this->_winFixFilename(Configuration::get($this->name.'_filepath')))) ? $this->l('Update Settings') : $this->l('Update Settings')).'" type="submit" />
 					</fieldset>';
 				if ($this->_compat > 14) {
 					if (Tools::usingSecureMode())
@@ -594,6 +731,11 @@ class GoogleBase extends Module
 				$this->_html .= '</form><br/>';
 	}
 	
+	/**
+	* Configuration form field validation
+	*
+	* Errors and warnings are stored in the class data members
+	*/
 	private function _postValidation()
 	{
 		// TODO Need to review form validation.....
@@ -606,7 +748,7 @@ class GoogleBase extends Module
 		// could check that this is a valid path, but the next test will
 		// do that for us anyway
 		// But first we need to get rid of the escape characters
-		$_POST['filepath'] = $this->winFixFilename($_POST['filepath']);
+		$_POST['filepath'] = $this->_winFixFilename($_POST['filepath']);
 		if (empty($_POST['filepath']) OR (strlen($_POST['filepath']) > 255))
 			$this->_mod_errors[] = $this->l('The target location is invalid');
   
@@ -614,10 +756,15 @@ class GoogleBase extends Module
 			$this->_mod_errors[] = $this->l('File error.<br />Cannot write to').' '.$_POST['filepath'];
 	}
 	
+	/**
+	* Standard configuration screen display function
+	*
+	* @return string	The HTML to display in the Admin screen
+	*/
 	function getContent()
 	{
 		$this->_html .= '<h2>'.$this->l('[BETA]Google Base Products Feed').' {compat='.$this->_compat.'}</h2>';
-		if(!is_writable(realpath($this->directory())))
+		if(!is_writable($this->_directory()))
 			$this->_warnings[] = $this->l('Output directory must be writable or the feed file will need to be pre-created with write permissions.');
   
 		if(isset($this->_warnings) AND sizeof($this->_warnings))
@@ -655,6 +802,12 @@ class GoogleBase extends Module
 		return $this->_html;
 	}
 	
+	/**
+	* Display any module warnings
+	*
+	* @param	array		The generated warnings to display
+	* @return		string	HTML formatted warnings	
+	*/
 	private function _displayWarnings($warn)
 	{
 		$str_output = '';
@@ -700,8 +853,11 @@ class GoogleBase extends Module
 	}
 	
 	/**
-	 * Display errors
-	 */
+	* Display any module errors
+	*
+	* @param	array	The generated errors to display
+	* * @return		string	HTML formatted errors	
+	*/
 	private function _displayErrors()
 	{
 		if ($nbErrors = count($this->_mod_errors))
@@ -730,17 +886,31 @@ class GoogleBase extends Module
 		}
 	}
 	
+	/**
+	* Check product availability in store
+	*
+	* @param	array	$product									The product data retrieved from the database
+	* @param	int			$id_product_attribute The attribute (variant) id
+	* @return 	string															Translated stock status
+	*/
 	public function getAvailability($product, $id_product_attribute  = 0)
 	{
 		// TODO: Need to check on actual variant availability
 		if ($product["quantity"]> 0)
       		return $this->l('in stock');
-    	else if ( self::checkQty($product,1))
+    	else if ( self::_checkQty($product,1))
       		return $this->l('available for order');
     	else
       		return $this->l('out of stock');
 	}
 	
+	/**
+	* Get installed (and active) currencies
+	*
+	* @param	book 	$object	Return as an object (true) or array (false)
+	* @param	int			$active	Return only active (true)
+	* @return		array							Currencies as objects or array
+	*/
 	public function getCurrencies($object = true, $active = 1)
 	{
 		
@@ -758,6 +928,12 @@ class GoogleBase extends Module
 		return $tab;
 	}
 	
+	/**
+	* Get active languages for store
+	*
+	* @return		array							Installed and active languages	
+	*
+	*/
 	public function getLanguages()
 	{
 		$languages = array();
@@ -772,7 +948,13 @@ class GoogleBase extends Module
 		return $languages;
 	}
 	
-	private function checkQty($product, $qty)	// copied and amended form classes/Product.php
+	/**
+	* Check product quantity available
+	*
+	* @param	array		$product	The product data retrieved from the database
+	* @return		bool										The result of the test
+	*/
+	private function _checkQty($product, $qty)	// copied and amended form classes/Product.php
 	{
 		if (Pack::isPack((int)$product['id_product']) && !Pack::isInStock((int)$product['id_product']))
 			return false;
