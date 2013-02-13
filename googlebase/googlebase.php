@@ -21,6 +21,10 @@ class GoogleBase extends Module
 	private $use_supplier;
 	private $nearby; // Not supported yet. Needs config option
 
+	////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+	// Module housekeeping and settings
+	//
+	
 	/**
 	* GoogleBase module constructor
 	*
@@ -144,7 +148,54 @@ class GoogleBase extends Module
 		}
 	  
 	}
+		/**
+	* Get installed (and active) currencies
+	*
+	* @param	book 	$object	Return as an object (true) or array (false)
+	* @param	int			$active	Return only active (true)
+	* @return		array							Currencies as objects or array
+	*/
+	public function getCurrencies($object = true, $active = 1)
+	{
+		
+		$tab = Db::getInstance()->ExecuteS('
+					SELECT *
+					FROM `'._DB_PREFIX_.'currency`
+					WHERE `deleted` = 0
+					'.($active == 1 ? 'AND `active` = 1' : '').'
+					ORDER BY `name` ASC');
+  
+		if ($object)
+			foreach ($tab as $key => $currency)
+				$tab[$currency['id_currency']] = Currency::getCurrencyInstance($currency['id_currency']);
+				
+		return $tab;
+	}
+	
+	/**
+	* Get active languages for store
+	*
+	* @return		array							Installed and active languages	
+	*
+	*/
+	public function getLanguages()
+	{
+		$languages = array();
+	
+		$result = Db::getInstance()->ExecuteS("
+						SELECT `id_lang`, `name`, `iso_code`, `active`
+						FROM `"._DB_PREFIX_."lang` WHERE `active` = '1'");
+	
+		foreach ($result AS $row)
+			  $languages[(int)($row['id_lang'])] = array('id_lang' => (int)($row['id_lang']), 'name' => $row['name'], 'iso_code' => $row['iso_code'], 'active' => (int)($row['active']));
+		
+		return $languages;
+	}
 
+	////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+	// File handling and directory management
+	//
+	
 	/**
 	* Shorthand to work out the __PS_BASE_URI__ directory
 	*
@@ -189,54 +240,7 @@ class GoogleBase extends Module
 		return $output_file;
 	}
 	
-	/**
-	* Produce a human readable "breadcrumb" path
-	*
-	* Multiple line detailed description.
-	* The handling of line breaks and HTML is up to the renderer.
-	* Order: short description - detailed description - doc tags.
-	*
-	* @param	int	 $id_cat Id of category to process
-	* @return		string				The path
-	*/
-	static private $cacheCatPath = array();
-	public function getPath($id_cat)
-	{
-		if (!isset(self::$cacheCatPath[$id_cat]))
-			self::$cacheCatPath[$id_cat] = $this->_getPath($id_cat);
-	  
-		return self::$cacheCatPath[$id_cat];
-	}
-
-	/**
-	* Recursive function to generate category path 
-	*
-	* @param	int	 $id_category The category id currently being processed
-	* @param string $path The current category path
-	* @return string					The resulting full category path
-	*/
-	private function _getPath($id_category, $path = '')
-	{
-		$category = new Category(intval($id_category), intval(Configuration::get($this->name.'_lang')));
-	
-		if (!Validate::isLoadedObject($category))
-			die (Tools::displayError('Failed to load category id= '.$id_category));
-  
-		if ($category->id == 1)
-			return htmlentities($path);
-  
-		$pipe = ' > ';
-  
-		// Fix for legacy ordering via numeric prefix
-		$category_name = preg_replace('/^[0-9]+\./', '', $category->name);
-  
-		if ($path != $category_name)
-			$path = $category_name.($path!='' ? $pipe.$path : '');
-  
-		return $this->_getPath(intval($category->id_parent), $path);
-	}
-	
-	/**
+		/**
 	* Create a url to access the generated feed
 	*
 	* @return		string	The url to the feed file
@@ -276,7 +280,11 @@ class GoogleBase extends Module
 			fclose($fp);
 		}
 	}
-
+	
+	////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+	// Feed generation and data properties
+	//
+	
 	/**
 	* Public create feed method for cron script
 	*
@@ -343,44 +351,6 @@ class GoogleBase extends Module
 	}
 
 	/**
-	* Convert entities 
-	*
-	* @param	string	$string The string to process
-	* @return		string						The processed string
-	*/	
-	private function _xmlentities($string)
-	{
-		$string = str_replace('&', '&amp;', $string);
-		$string = str_replace('"', '&quot;', $string);
-		$string = str_replace('\'', '&apos;', $string);
-		$string = str_replace('`', '&apos;', $string);
-		$string = str_replace('<', '&lt;', $string);
-		$string = str_replace('>', '&gt;', $string);
-		 return ($string);
-	}
-
-	/**
-	* Format name:value into an XML element format
-	*
-	* @param	string	$name The element name
-	* @param	string	$value  The value for the element
-	* @param	bool 		$encoding Whether to encode entities
-	* @param 	bool 		$force_zero Decide whether "zero" is a valid value for this element (otherwise omit whole element)
-	* @param 	bool			$integer Treat value as an integer for special handling
-	* @return		string							The formatted XML element
-	*/	
-	private function _xmlElement($name, $value, $encoding = false, $force_zero = false, $integer = false)
-	{
-		$element = '';
-    if ((!empty($value) && !($integer && (int)$value==0)) || $force_zero) {
-			if ($encoding)
-				$value = $this->_xmlentities($value);
-			$element .= "<".$name.">".$value."</".$name.">\n";
-		}
-		return $element;
-	}
-
-	/**
 	* Process a single product (or variant)
 	*
 	* @param	array	$product										The data associated with the product from the database
@@ -433,7 +403,7 @@ class GoogleBase extends Module
 		$item_data .= $this->_xmlElement('g:condition', $this->_getCondition($product['condition']));
 		
 		// 2. Availability & Price
-		$item_data .= $this->_xmlElement('g:availability',$this->getAvailability($product, $id_product_attribute));
+		$item_data .= $this->_xmlElement('g:availability',$this->_getAvailability($product, $id_product_attribute));
 		// Price is WITHOUT any reduction
 		$price = $this->_getPrice($product['id_product'], $id_product_attribute);
 		$item_data .= $this->_xmlElement('g:price', $price);
@@ -475,6 +445,25 @@ class GoogleBase extends Module
 		return $item_data;
 	}
 
+	/**
+	* Produce a human readable "breadcrumb" path
+	*
+	* Multiple line detailed description.
+	* The handling of line breaks and HTML is up to the renderer.
+	* Order: short description - detailed description - doc tags.
+	*
+	* @param	int	 $id_cat Id of category to process
+	* @return		string				The path
+	*/
+	static private $cacheCatPath = array();
+	public function getPath($id_cat)
+	{
+		if (!isset(self::$cacheCatPath[$id_cat]))
+			self::$cacheCatPath[$id_cat] = $this->_getPath($id_cat);
+	  
+		return self::$cacheCatPath[$id_cat];
+	}
+	
 	/**
 	* Fetch the Global Trade Identifier as configured for the module
 	*
@@ -532,6 +521,23 @@ class GoogleBase extends Module
 			break;
 		}
 		return $condition;
+	}
+	
+	/**
+	* Check product availability in store
+	*
+	* @param	array	$product									The product data retrieved from the database
+	* @param	int			$id_product_attribute The attribute (variant) id
+	* @return 	string															Translated stock status
+	*/
+	private function _getAvailability($product, $id_product_attribute  = 0)
+	{
+		if (StockAvailable::getQuantityAvailableByProduct($product['id_product'], $id_product_attribute) > 0 )
+      return $this->l('in stock');
+    else if ( self::_checkQty($product, $id_product_attribute, 1))
+      return $this->l('available for order');
+    else
+      return $this->l('out of stock');
 	}
 	
 	/**
@@ -605,6 +611,9 @@ class GoogleBase extends Module
 		return $this->context->link->getProductLink($product, null, null, null, (int)$this->id_lang).$variant_anchor;
 	}
 	
+	////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+	// Module Configuration and settings
+	//
 	/**
 	* Display details of generated feed in configure screen
 	*
@@ -886,66 +895,46 @@ class GoogleBase extends Module
 		}
 	}
 	
+	////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+	// General support and low-level utilities
+	//
+	
 	/**
-	* Check product availability in store
+	* Convert entities 
 	*
-	* @param	array	$product									The product data retrieved from the database
-	* @param	int			$id_product_attribute The attribute (variant) id
-	* @return 	string															Translated stock status
-	*/
-	public function getAvailability($product, $id_product_attribute  = 0)
+	* @param	string	$string The string to process
+	* @return		string						The processed string
+	*/	
+	private function _xmlentities($string)
 	{
-		// TODO: Need to check on actual variant availability
-		if ($product["quantity"]> 0)
-      		return $this->l('in stock');
-    	else if ( self::_checkQty($product,1))
-      		return $this->l('available for order');
-    	else
-      		return $this->l('out of stock');
+		$string = str_replace('&', '&amp;', $string);
+		$string = str_replace('"', '&quot;', $string);
+		$string = str_replace('\'', '&apos;', $string);
+		$string = str_replace('`', '&apos;', $string);
+		$string = str_replace('<', '&lt;', $string);
+		$string = str_replace('>', '&gt;', $string);
+		 return ($string);
 	}
-	
+
 	/**
-	* Get installed (and active) currencies
+	* Format name:value into an XML element format
 	*
-	* @param	book 	$object	Return as an object (true) or array (false)
-	* @param	int			$active	Return only active (true)
-	* @return		array							Currencies as objects or array
-	*/
-	public function getCurrencies($object = true, $active = 1)
+	* @param	string	$name The element name
+	* @param	string	$value  The value for the element
+	* @param	bool 		$encoding Whether to encode entities
+	* @param 	bool 		$force_zero Decide whether "zero" is a valid value for this element (otherwise omit whole element)
+	* @param 	bool			$integer Treat value as an integer for special handling
+	* @return		string							The formatted XML element
+	*/	
+	private function _xmlElement($name, $value, $encoding = false, $force_zero = false, $integer = false)
 	{
-		
-		$tab = Db::getInstance()->ExecuteS('
-					SELECT *
-					FROM `'._DB_PREFIX_.'currency`
-					WHERE `deleted` = 0
-					'.($active == 1 ? 'AND `active` = 1' : '').'
-					ORDER BY `name` ASC');
-  
-		if ($object)
-			foreach ($tab as $key => $currency)
-				$tab[$currency['id_currency']] = Currency::getCurrencyInstance($currency['id_currency']);
-				
-		return $tab;
-	}
-	
-	/**
-	* Get active languages for store
-	*
-	* @return		array							Installed and active languages	
-	*
-	*/
-	public function getLanguages()
-	{
-		$languages = array();
-	
-		$result = Db::getInstance()->ExecuteS("
-						SELECT `id_lang`, `name`, `iso_code`, `active`
-						FROM `"._DB_PREFIX_."lang` WHERE `active` = '1'");
-	
-		foreach ($result AS $row)
-			  $languages[(int)($row['id_lang'])] = array('id_lang' => (int)($row['id_lang']), 'name' => $row['name'], 'iso_code' => $row['iso_code'], 'active' => (int)($row['active']));
-		
-		return $languages;
+		$element = '';
+    if ((!empty($value) && !($integer && (int)$value==0)) || $force_zero) {
+			if ($encoding)
+				$value = $this->_xmlentities($value);
+			$element .= "<".$name.">".$value."</".$name.">\n";
+		}
+		return $element;
 	}
 	
 	/**
@@ -954,7 +943,7 @@ class GoogleBase extends Module
 	* @param	array		$product	The product data retrieved from the database
 	* @return		bool										The result of the test
 	*/
-	private function _checkQty($product, $qty)	// copied and amended form classes/Product.php
+	private function _checkQty($product, $id_product_attribute = 0, $qty = 1)
 	{
 		if (Pack::isPack((int)$product['id_product']) && !Pack::isInStock((int)$product['id_product']))
 			return false;
@@ -962,11 +951,35 @@ class GoogleBase extends Module
 		if (Product::isAvailableWhenOutOfStock(StockAvailable::outOfStock($product['id_product'])))
 			return true;
 
-//		if (isset($this->id_product_attribute))
-//			$id_product_attribute = $this->id_product_attribute;
-//		else
-			$id_product_attribute = 0;
-
-		return ($qty <= StockAvailable::getQuantityAvailableByProduct($product['id_product'], $id_product_attribute));
+		return false;
 	}
+
+	/**
+	* Recursive function to generate category path 
+	*
+	* @param	int	 $id_category The category id currently being processed
+	* @param string $path The current category path
+	* @return string					The resulting full category path
+	*/
+	private function _getPath($id_category, $path = '')
+	{
+		$category = new Category(intval($id_category), intval(Configuration::get($this->name.'_lang')));
+	
+		if (!Validate::isLoadedObject($category))
+			die (Tools::displayError('Failed to load category id= '.$id_category));
+  
+		if ($category->id == 1)
+			return htmlentities($path);
+  
+		$pipe = ' > ';
+  
+		// Fix for legacy ordering via numeric prefix
+		$category_name = preg_replace('/^[0-9]+\./', '', $category->name);
+  
+		if ($path != $category_name)
+			$path = $category_name.($path!='' ? $pipe.$path : '');
+  
+		return $this->_getPath(intval($category->id_parent), $path);
+	}
+
 }
