@@ -19,11 +19,16 @@ class GoogleBase extends Module
 	private $currencies;
 	private $gtin_field;
 	private $use_supplier;
-	private $nearby; // Not supported yet. Needs config option
-
-	////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-	// Module housekeeping and settings
-	//
+	
+	/* Not yet supported - needs config option to enable/disable */
+	private $nearby;
+	/* Maintain to enhance error messages */
+	private $current_product;
+	
+	/*
+	*
+	* Module housekeeping and settings
+	*/
 	
 	/**
 	* GoogleBase module constructor
@@ -35,7 +40,7 @@ class GoogleBase extends Module
 	{
 		// Determine major Prestashop release (only used for debug)
 		$version_mask = explode('.', _PS_VERSION_, 3);
-		$this->_compat = (int)($version_mask[0]*10)+$version_mask[1];
+		$this->_compat = (int)($version_mask[0] * 10) + $version_mask[1];
 		
 		$this->_warnings = array();
 		$this->_mod_errors = array();
@@ -50,8 +55,8 @@ class GoogleBase extends Module
 		
 		// Set default config values if they don't already exist (here for compatibility in case the user doesn't uninstall/install at upgrade)
 		// Also set global "macro" data for the feed and check for store configuration changes
-		if ($this->isInstalled($this->name)) {
-			
+		if ($this->isInstalled($this->name))
+		{	
 			// Cleanup old configuration values that are deprecated
 			if (Configuration::get($this->name.'_condition'))
 				Configuration::deleteByName($this->name.'_condition');
@@ -133,7 +138,8 @@ class GoogleBase extends Module
 	  
 		$this->use_supplier = Configuration::get($this->name.'_use_supplier');
 		// Fix old setting method
-		if ($this->use_supplier == '1') {
+		if ($this->use_supplier == '1')
+		{
 			Configuration::updateValue($this->name.'_use_supplier', 'on');
 			$this->use_supplier = 'on';
 		}
@@ -157,7 +163,6 @@ class GoogleBase extends Module
 	*/
 	public function getCurrencies($object = true, $active = 1)
 	{
-		
 		$tab = Db::getInstance()->ExecuteS('
 					SELECT *
 					FROM `'._DB_PREFIX_.'currency`
@@ -182,19 +187,19 @@ class GoogleBase extends Module
 	{
 		$languages = array();
 	
-		$result = Db::getInstance()->ExecuteS("
+		$result = Db::getInstance()->ExecuteS('
 						SELECT `id_lang`, `name`, `iso_code`, `active`
-						FROM `"._DB_PREFIX_."lang` WHERE `active` = '1'");
+						FROM `'._DB_PREFIX_.'lang` WHERE `active` = \'1\'');
 	
-		foreach ($result AS $row)
+		foreach ($result as $row)
 			  $languages[(int)($row['id_lang'])] = array('id_lang' => (int)($row['id_lang']), 'name' => $row['name'], 'iso_code' => $row['iso_code'], 'active' => (int)($row['active']));
 		
 		return $languages;
 	}
 
-	////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-	// File handling and directory management
-	//
+	/*
+	 * File handling and directory management
+	 */
 	
 	/**
 	* Shorthand to work out the __PS_BASE_URI__ directory
@@ -217,7 +222,7 @@ class GoogleBase extends Module
 	*/
 	private function _winFixFilename($file)
 	{
-		return str_replace('\\\\','\\',$file);
+		return str_replace('\\\\', '\\', $file);
 	}
 
 	/**
@@ -233,7 +238,7 @@ class GoogleBase extends Module
 
 		// If there's a windows directory separator on the end,
 		// then don't add the unix one too when building the final output file
-		if (substr($output_dir, -1, 1)=='\\')
+		if (substr($output_dir, -1, 1) == '\\')
 			$dir_separator = '';
 
 		$output_file = $output_dir.$dir_separator.$this->lang_iso.'_'.strtolower($this->currencies[$this->id_currency]->iso_code).'_googlebase.xml';
@@ -248,14 +253,14 @@ class GoogleBase extends Module
 	private function _file_url()
 	{
 		$filename = $this->_winFixFilename(Configuration::get($this->name.'_filepath'));
-		$file = str_replace($this->_directory(),'', $filename);
+		$file = str_replace($this->_directory(), '', $filename);
   
 		$separator = '';
   
-		if (substr($file, 0, 1)=='\\')
+		if (substr($file, 0, 1) == '\\')
 			substr_replace($file, '/', 0, 1);
   
-		if (substr($file, 0, 1)!='/')
+		if (substr($file, 0, 1) != '/')
 			$separator = '/';
   
 		return 'http://'.$_SERVER['HTTP_HOST'].$separator.$file;
@@ -273,7 +278,7 @@ class GoogleBase extends Module
 	private function _addToFeed($str)
 	{
 		$filename = $this->_winFixFilename(Configuration::get($this->name.'_filepath'));
-		if(file_exists($filename))
+		if (file_exists($filename))
 		{
 			$fp = fopen($filename, 'ab');
 			fwrite($fp, $str, strlen($str));
@@ -281,15 +286,16 @@ class GoogleBase extends Module
 		}
 	}
 	
-	////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-	// Feed generation and data properties
-	//
+	/*
+	 * Feed generation and data properties
+	 */
 	
 	/**
 	* Public create feed method for cron script
 	*
 	*/
-	public function do_crontask() {
+	public function do_crontask()
+	{
 		$this->_postProcess(true);
 	}
 	
@@ -300,48 +306,54 @@ class GoogleBase extends Module
 	*/	
 	private function _postProcess($cron = false)
 	{
-		$products = Product::getProducts($this->id_lang, 0, NULL, 'id_product', 'ASC');
+		$products = Product::getProducts($this->id_lang, 0, null, 'id_product', 'ASC');
   
-		if ($products) {
-			if (!$fp = fopen($this->_winFixFilename(Configuration::get($this->name.'_filepath')), 'w')) {
+		if ($products)
+		{
+			if (!$fp = fopen($this->_winFixFilename(Configuration::get($this->name.'_filepath')), 'w'))
+			{
 				$this->_mod_errors[] = $this->l('Error writing to feed file.');
 				return;
 			}
 			fclose($fp);
   
 			// Required headers
-			$items = "<?xml version=\"1.0\"?>\n\n"
-				  . "<rss version =\"2.0\" xmlns:g=\"http://base.google.com/ns/1.0\">\n\n"
-				  . "<channel>\n"
-				  . "<title>Google Base feed for ".$_SERVER['HTTP_HOST']."</title>\n"
-				. "<link>http://".$_SERVER['HTTP_HOST']."/</link>\n"
-				  . "<description>".$this->_xmlentities($this->xml_description)."</description>\n"
-				  . "\n";
+			$items = '<?xml version="1.0"?>'."\n"
+				  .'<rss version ="2.0" xmlns:g="http://base.google.com/ns/1.0">'."\n"
+				  .'<channel>'."\n"
+				  .'<title>Google Base feed for '.$_SERVER['HTTP_HOST'].'</title>'."\n"
+					.'<link>http://'.$_SERVER['HTTP_HOST'].'/</link>'."\n"
+				  .'<description>'.$this->_xmlentities($this->xml_description).'</description>'."\n";
 		
-			foreach ($products AS $product) {
-			 	if ($product['active']) {
+			foreach ($products as $product)
+			{
+			 	if ($product['active'])
+				{
 					//echo '<pre>'.print_r($product, true).'</pre>';
 					//echo '<h2>Product Id: '.$product['id_product'].'</h2><pre>'.print_r(Product::getProductAttributesIds($product['id_product']), true).'</pre>';
 					
 					// We need to check whether we need to loop for product variants
 					$combinations = Product::getProductAttributesIds($product['id_product']);
-					if (empty($combinations)) {
+					if (empty($combinations))
+					{
 						$items .= "<item>\n";
 						$items .= $this->_processProduct($product);
 						$items .= "</item>\n\n";
-					} else {
-						foreach ($combinations as $combination) {
+					}
+					else
+						foreach ($combinations as $combination)
+						{
 							$items .= "<item>\n";
 							$items .= $this->_processProduct($product, $combination['id_product_attribute']);
 							$items .= "</item>\n\n";
 						}
-					}
 				}
 			}
 			$this->_addToFeed( "$items</channel>\n</rss>\n" );
 		}
   
-		if (!$cron) {
+		if (!$cron)
+		{
 			$res = file_exists($this->_winFixFilename(Configuration::get($this->name.'_filepath')));
 			if ($res)
 				$this->_html .= '<h3 class="conf confirm" style="margin-bottom: 20px">'.$this->l('Feed file successfully generated').'</h3>';
@@ -359,11 +371,13 @@ class GoogleBase extends Module
 	private function _processProduct($product, $id_product_attribute = 0)
 	{
 		$item_data = '';
-		if ($id_product_attribute) {
+		// Maintain a copy of the current product id for more meaningful error messages
+		$this->current_product = $product['id_product'];
+		if ($id_product_attribute)
 			$variant = new Combination($id_product_attribute);
-		} else {
+		else
 			$variant = '';
-		}
+
 		$product_link = $this->_getProductLink($product, $variant);
 		$image_links = $this->_getImageLinks($product);
 		
@@ -371,46 +385,46 @@ class GoogleBase extends Module
 		
 		// 1. Basic Product Information
 		
-		$item_data .= $this->_xmlElement('g:id',"pc".$this->lang_iso."-".$product['id_product'].'-'.$id_product_attribute);
-		if (is_object($variant)) {
-			$item_data .= $this->_xmlElement('g:item_group_id', "pc".$this->lang_iso."-".$product['id_product']);
+		$item_data .= $this->_xmlElement('g:id', 'pc'.$this->lang_iso.'-'.$product['id_product'].'-'.$id_product_attribute);
+		if (is_object($variant))
+		{
+			$item_data .= $this->_xmlElement('g:item_group_id', 'pc'.$this->lang_iso.'-'.$product['id_product']);
 			$variant_labels = $variant->getAttributesName($this->id_lang);
-			$variant_name = $product['name']. ' (';
-			foreach ($variant_labels as $label) {
+			$variant_name = $product['name'].' (';
+			foreach ($variant_labels as $label)
 				$variant_name .= ' '.$label['name'];
-			}
+				
 			$variant_name = $variant_name.' )';
-			$item_data .= $this->_xmlElement('title',$variant_name, true);
-		} else {
-			$item_data .= $this->_xmlElement('title',$product['name'], true);
-		}
+			$item_data .= $this->_xmlElement('title', $variant_name, true);
+		} else
+			$item_data .= $this->_xmlElement('title', $product['name'], true);
 		
 		// Try our best to get a decent description
 		$description = trim(strip_tags(strlen($product['description_short']) ? $product['description_short'] :  $product['description'] ));
 		// Remove invalid characters that may have been inserted incorrectly
-		$description = preg_replace('/[^\x0A\x0D\x20-\x7F]/',"", $description);
-		$item_data .= $this->_xmlElement('description','<![CDATA['.$description.']]>');
+		$description = preg_replace('/[^\x0A\x0D\x20-\x7F]/', '', $description);
+		$item_data .= $this->_xmlElement('description', '<![CDATA['.$description.']]>');
 		
 		// google product category <g:google_product_category /> - Google's category of the item (TODO: support this!)
 		
-		$item_data .= $this->_xmlElement('g:product_type',$this->getPath($product['id_category_default']));
-		$item_data .= $this->_xmlElement('link',$product_link, true);
+		$item_data .= $this->_xmlElement('g:product_type', $this->getPath($product['id_category_default']));
+		$item_data .= $this->_xmlElement('link', $product_link, true);
 		if ($image_links[0]['valid'] == 1)
-			$item_data .= $this->_xmlElement('g:image_link',$image_links[0]['link'], true);
+			$item_data .= $this->_xmlElement('g:image_link', $image_links[0]['link'], true);
 		if ($image_links[1]['valid'] == 1)
-			$item_data .= $this->_xmlElement('g:additional_image_link',$image_links[1]['link'], true);
+			$item_data .= $this->_xmlElement('g:additional_image_link', $image_links[1]['link'], true);
 		
 		$item_data .= $this->_xmlElement('g:condition', $this->_getCondition($product['condition']));
 		
 		// 2. Availability & Price
-		$item_data .= $this->_xmlElement('g:availability',$this->_getAvailability($product, $id_product_attribute));
+		$item_data .= $this->_xmlElement('g:availability', $this->_getAvailability($product, $id_product_attribute));
 		// Price is WITHOUT any reduction
 		$price = $this->_getPrice($product['id_product'], $id_product_attribute);
 		$item_data .= $this->_xmlElement('g:price', $price);
 		// TODO: If there is an active discount, then include it
 		$price_with_reduction = $this->_getSalePrice($product['id_product'], $id_product_attribute);
 		if ($price_with_reduction !== $price)
-			$item_data .= $this->_xmlElement('g:sale_price',$price_with_reduction);
+			$item_data .= $this->_xmlElement('g:sale_price', $price_with_reduction);
 		/*
 		// Effective date is in ISO8601 format TODO: Support "sales" somehow - need a way of returning "expiry date" for the reduction
 		$items .= "<g:sale_price_effective_date>".Product::getPriceStatic(intval($product['id_product']))."</g:sale_price_effective_date>\n";
@@ -418,29 +432,27 @@ class GoogleBase extends Module
 		
 		// 3. Unique Product Identifiers
 		if ($product['manufacturer_name'])
-			$item_data .= $this->_xmlElement('g:brand',$product['manufacturer_name'], true);
+			$item_data .= $this->_xmlElement('g:brand', $product['manufacturer_name'], true);
 		
 		// gtin value
 		$item_data .= $this->_xmlElement('g:gtin', $this->_getGtinValue($product, $variant));
 		
-		if ($this->use_supplier == 'on') {
-			if (isset($product['id_supplier']) && !empty($product['id_supplier']) || (is_object($variant) && !empty($variant->supplier_reference))) {
-				if (!is_object($variant)) {
-					$item_data .= $this->_xmlElement('g:mpn',ProductSupplier::getProductSupplierReference($product['id_product'], 0, $product['id_supplier']));
-				} else {
+		if ($this->use_supplier == 'on')
+			if (isset($product['id_supplier']) && !empty($product['id_supplier']) || (is_object($variant) && !empty($variant->supplier_reference)))
+			
+				if (!is_object($variant))
+					$item_data .= $this->_xmlElement('g:mpn', ProductSupplier::getProductSupplierReference($product['id_product'], 0, $product['id_supplier']));
+				else
 					$item_data .= $this->_xmlElement('g:mpn', $variant->supplier_reference);
-				}
-			}
-		} else {
-			if (!is_object($variant)) {
-					$item_data .= $this->_xmlElement('g:mpn',$product['reference']);
-				} else {
-					$item_data .= $this->_xmlElement('g:mpn', $variant->reference);
-				}
-		}
+			
+		elseif (!is_object($variant))
+				$item_data .= $this->_xmlElement('g:mpn', $product['reference']);
+			else
+				$item_data .= $this->_xmlElement('g:mpn', $variant->reference);
+				
 		// 7. Nearby Stores (US & UK only)
 		if ($this->nearby)
-			$item_data .= $this->_xmlElement('g:online_only',$product['online_only'] == 1 ? 'y' : 'n');
+			$item_data .= $this->_xmlElement('g:online_only', $product['online_only'] == 1 ? 'y' : 'n');
 		
 		return $item_data;
 	}
@@ -473,7 +485,8 @@ class GoogleBase extends Module
 	*/	
 	private function _getGtinValue($product, $variant = null)
 	{
-		if (!is_object($variant)) {
+		if (!is_object($variant))
+		{
 			$ean13 = $product['ean13'];
 			$upc = $product['upc'];
 		} else {
@@ -483,7 +496,8 @@ class GoogleBase extends Module
 		
 		$gtin = '';
 	
-		switch ($this->gtin_field) {
+		switch ($this->gtin_field)
+		{
 			case 'isbn10':
 			case 'isbn13':
 			case 'jan8':
@@ -509,7 +523,8 @@ class GoogleBase extends Module
 	*/
 	private function _getCondition($condition)
 	{
-		switch ($condition) {
+		switch ($condition)
+		{
 			case 'new':
 				$condition = $this->l('new');
 			break;
@@ -530,14 +545,14 @@ class GoogleBase extends Module
 	* @param	int			$id_product_attribute The attribute (variant) id
 	* @return 	string															Translated stock status
 	*/
-	private function _getAvailability($product, $id_product_attribute  = 0)
+	private function _getAvailability($product, $id_product_attribute = 0)
 	{
-		if (StockAvailable::getQuantityAvailableByProduct($product['id_product'], $id_product_attribute) > 0 )
+		if (StockAvailable::getQuantityAvailableByProduct($product['id_product'], $id_product_attribute) > 0)
       return $this->l('in stock');
-    else if ( self::_checkQty($product, $id_product_attribute, 1))
+    else if (self::_checkQty($product, $id_product_attribute, 1))
       return $this->l('available for order');
-    else
-      return $this->l('out of stock');
+
+    return $this->l('out of stock');
 	}
 	
 	/**
@@ -547,9 +562,9 @@ class GoogleBase extends Module
 	* @param	int			The attribute (variant) id
 	* @return		float	The price
 	*/
-	private function _getPrice($id_product, $id_product_attrib = NULL)
+	private function _getPrice($id_product, $id_product_attrib = null)
 	{
-		$price = number_format(Tools::convertPrice(Product::getPriceStatic(intval($id_product), true, $id_product_attrib, 6, NULL, false, false), $this->currencies[$this->id_currency]), 2, '.', '');
+		$price = number_format(Tools::convertPrice(Product::getPriceStatic(intval($id_product), true, $id_product_attrib, 6, null, false, false), $this->currencies[$this->id_currency]), 2, '.', '');
 		
 		return $price.' '.$this->currencies[$this->id_currency]->iso_code;
 	}
@@ -561,7 +576,7 @@ class GoogleBase extends Module
 	* @param	int			The attribute (variant) id
 	* @return		float	The sale price
 	*/
-	private function _getSalePrice($id_product, $id_product_attrib = NULL)
+	private function _getSalePrice($id_product, $id_product_attrib = null)
 	{
 		$price = number_format(Tools::convertPrice(Product::getPriceStatic(intval($id_product), true, $id_product_attrib, 6), $this->currencies[$this->id_currency]), 2, '.', '');
 		
@@ -582,11 +597,13 @@ class GoogleBase extends Module
 		$image_data = array(array('link' => '', 'valid' => 0), array('link' => '', 'valid' => 0));
 		$images = Image::getImages($this->id_lang, $product['id_product']);
 		
-		if (isset($images[0])) {
+		if (isset($images[0]))
+		{
 			$image_data[0]['link'] = $this->context->link->getImageLink($product['link_rewrite'], (int)$product['id_product'].'-'.(int)$images[0]['id_image']);
 			$image_data[0]['valid'] = 1;
 		}
-		if (isset($images[1])) {
+		if (isset($images[1]))
+		{
 			$image_data[1]['link'] = $this->context->link->getImageLink($product['link_rewrite'], (int)$product['id_product'].'-'.(int)$images[1]['id_image']);
 			$image_data[1]['valid'] = 1;
 		}
@@ -604,16 +621,18 @@ class GoogleBase extends Module
 	private function _getProductLink($product, $variant = null)
 	{
 		$variant_anchor = '';
-		if (is_object($variant)) {
+		if (is_object($variant))
+		{
 			$product_object = new Product($product['id_product']);
 			$variant_anchor = $product_object->getAnchor($variant->id);
 		}
 		return $this->context->link->getProductLink($product, null, null, null, (int)$this->id_lang).$variant_anchor;
 	}
 	
-	////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-	// Module Configuration and settings
-	//
+	/*
+	 * Module Configuration and settings
+	 */
+	
 	/**
 	* Display details of generated feed in configure screen
 	*
@@ -622,14 +641,14 @@ class GoogleBase extends Module
 	private function _displayFeed()
 	{
 		$filename = $this->_winFixFilename(Configuration::get($this->name.'_filepath'));
-		if(file_exists($filename)) {
+		if (file_exists($filename))
+		{
 			$this->_html .= '<fieldset><legend><img src="../img/admin/enabled.gif" alt="" class="middle" />'.$this->l('Feed Generated').'</legend>';
-			if (strpos($filename,$this->_directory()) === FALSE)
-			{
+			if (strpos($filename, $this->_directory()) === false)
 				$this->_html .= '<p>'.$this->l('Your Google Base feed file is available via ftp as the following:').' <b>'.$filename.'</b></p><br />';
-			} else {
+			else
 				$this->_html .= '<p>'.$this->l('Your Google Base feed file is online at the following address:').' <a href="'.$this->_file_url().'"><b>'.$this->_file_url().'</b></a></p><br />';
-			}
+			
 			$this->_html .= $this->l('Last Updated:').' <b>'.date('m.d.y G:i:s', filemtime($filename)).'</b><br />';
 			$this->_html .= '</fieldset>';
 		} else {
@@ -651,8 +670,7 @@ class GoogleBase extends Module
 		$this->currency = Tools::getValue('currency', Configuration::get($this->name.'_currency'));
 		$this->id_lang = Tools::getValue('language', Configuration::get($this->name.'_lang'));
 	  
-		$this->_html .=
-				'<form action="'.$_SERVER['REQUEST_URI'].'" method="post">
+		$this->_html .= '<form action="'.$_SERVER['REQUEST_URI'].'" method="post">
 				<center><input name="btnSubmit" id="btnSubmit" class="button" value="'.$this->l('Generate XML feed file').'" type="submit" /></center>
 				</form>'.
 				'<form action="'.$_SERVER['REQUEST_URI'].'" method="post">
@@ -670,21 +688,21 @@ class GoogleBase extends Module
 			  <label>'.$this->l('Currency').'</label>
 			  <div class="margin-form">
 				<select name="currency" id="currency" >';
-				foreach ($this->currencies as $id => $currency) {
+				foreach ($this->currencies as $id => $currency)
 					if ($id)
-					$this->_html .= '<option value="'.$id.'"'.($this->currency == $id ? ' selected="selected"' : '').' > '.$currency->iso_code.' </option>';
-				}
-				$this->_html .='</select>
-				<p class="clear">'.$this->l('Store default ='). ' ' . $this->currencies[(int)Configuration::get('PS_CURRENCY_DEFAULT')]->iso_code.'</p>
+						$this->_html .= '<option value="'.$id.'"'.($this->currency == $id ? ' selected="selected"' : '').' > '.$currency->iso_code.' </option>';
+				
+				$this->_html .= '</select>
+				<p class="clear">'.$this->l('Store default =').' '.$this->currencies[(int)Configuration::get('PS_CURRENCY_DEFAULT')]->iso_code.'</p>
 			  </div>
 			  <label>'.$this->l('Language').'</label>
 			  <div class="margin-form">
 				<select name="language" id="language" >';
-				foreach ($this->languages as $language) {
+				foreach ($this->languages as $language)
 					$this->_html .= '<option value="'.$language['id_lang'].'"'.($this->id_lang == $language['id_lang'] ? ' selected="selected"' : '').' > '.$language['name'].' </option>';
-				}
-				$this->_html .='</select>
-				<p class="clear">'.$this->l('Store default ='). ' ' . $this->languages[$this->context->cookie->id_lang]['name'].'</p>
+				
+				$this->_html .= '</select>
+				<p class="clear">'.$this->l('Store default =').' '.$this->languages[$this->context->cookie->id_lang]['name'].'</p>
 			  </div>
 			  <fieldset class="space">
 							<p style="font-size: smaller;"><img src="../img/admin/unknown.gif" alt="" class="middle" />'.
@@ -713,7 +731,7 @@ class GoogleBase extends Module
 						<br />
 			  <label>'.$this->l('Use Supplier Reference').'</label>
 			  <div class="margin-form">
-				<input type="checkbox" name="use_supplier" id="use_supplier" value="on"' . ($this->use_supplier == 'on' ? 'checked="checked" ' : '') . ' />
+				<input type="checkbox" name="use_supplier" id="use_supplier" value="on"'.($this->use_supplier == 'on' ? 'checked="checked" ' : '').' />
 				<p class="clear">'.$this->l('Use the supplier reference field (default) rather than the reference field as Manufacturers Part Number (MPN)').'</p>
 			  </div>
 			  <label>'.$this->l('Unique Product Identifier').'</label>
@@ -725,18 +743,18 @@ class GoogleBase extends Module
 			  </div>
 			  <input name="btnUpdate" id="btnUpdate" class="button" value="'.((!file_exists($this->_winFixFilename(Configuration::get($this->name.'_filepath')))) ? $this->l('Update Settings') : $this->l('Update Settings')).'" type="submit" />
 					</fieldset>';
-				if ($this->_compat > 14) {
-					if (Tools::usingSecureMode())
-						$domain = Tools::getShopDomainSsl(true);
-					else
-						$domain = Tools::getShopDomain(true);
-					$this->_html .= '<fieldset class="space">
-					<legend><img src="../img/admin/cog.gif" alt="" class="middle" />'.$this->l('Cron Job').'</legend>
-					<p>
-						<b>'.$domain.__PS_BASE_URI__.'modules/googlebase/googlebase-cron.php?token='.substr(Tools::encrypt('googlebase/cron'),0,10).'&module=googlebase</b>
-					</p>
-					</fieldset>';
-				}
+
+				if (Tools::usingSecureMode())
+					$domain = Tools::getShopDomainSsl(true);
+				else
+					$domain = Tools::getShopDomain(true);
+				$this->_html .= '<fieldset class="space">
+				<legend><img src="../img/admin/cog.gif" alt="" class="middle" />'.$this->l('Cron Job').'</legend>
+				<p>
+					<b>'.$domain.__PS_BASE_URI__.'modules/googlebase/googlebase-cron.php?token='.substr(Tools::encrypt('googlebase/cron'), 0, 10).'&module=googlebase</b>
+				</p>
+				</fieldset>';
+				
 				$this->_html .= '</form><br/>';
 	}
 	
@@ -752,13 +770,13 @@ class GoogleBase extends Module
 		
 		Configuration::updateValue($this->name.'_use_supplier', Tools::getValue('use_supplier') ? Tools::getValue('use_supplier') : 'off');
   
-		if (empty($_POST['description']) OR strlen($_POST['description']) > 10000)
+		if (empty($_POST['description']) || strlen($_POST['description']) > 10000)
 			$this->_mod_errors[] = $this->l('Description is invalid');
 		// could check that this is a valid path, but the next test will
 		// do that for us anyway
 		// But first we need to get rid of the escape characters
 		$_POST['filepath'] = $this->_winFixFilename($_POST['filepath']);
-		if (empty($_POST['filepath']) OR (strlen($_POST['filepath']) > 255))
+		if (empty($_POST['filepath']) || (strlen($_POST['filepath']) > 255))
 			$this->_mod_errors[] = $this->l('The target location is invalid');
   
 		if (file_exists($_POST['filepath']) && !is_writable($_POST['filepath']))
@@ -770,22 +788,20 @@ class GoogleBase extends Module
 	*
 	* @return string	The HTML to display in the Admin screen
 	*/
-	function getContent()
+	public function getContent()
 	{
 		$this->_html .= '<h2>'.$this->l('[BETA]Google Base Products Feed').' {compat='.$this->_compat.'}</h2>';
-		if(!is_writable($this->_directory()))
+		if (!is_writable($this->_directory()))
 			$this->_warnings[] = $this->l('Output directory must be writable or the feed file will need to be pre-created with write permissions.');
   
-		if(isset($this->_warnings) AND sizeof($this->_warnings))
-		{
+		if (isset($this->_warnings) && count($this->_warnings))
 		  $this->_displayWarnings($this->_warnings);
-		}
   
 		if (Tools::getValue('btnUpdate'))
 		{
 			$this->_postValidation();
   
-			if (!sizeof($this->_mod_errors))
+			if (!count($this->_mod_errors))
 			{
 				Configuration::updateValue($this->name.'_description', Tools::getValue('description'));
 				Configuration::updateValue($this->name.'_filepath', addslashes($_POST['filepath'])); // the Tools class kills the windows file name separators :(
@@ -795,15 +811,10 @@ class GoogleBase extends Module
 				Configuration::updateValue($this->name.'_lang', (int)Tools::getValue('language'));	// language to generate feed for
   
 				$this->_getGlobals();
-			} else {
-				if (isset($this->_mod_errors) AND sizeof($this->_mod_errors)) {
-					$this->_displayErrors($this->_mod_errors);
-				}
-			}
-		} else if (Tools::getValue('btnSubmit')) {
-			// Go try and generate the feed
+			} elseif (isset($this->_mod_errors) && count($this->_mod_errors))
+				$this->_displayErrors($this->_mod_errors);
+		} else if (Tools::getValue('btnSubmit'))
 			$this->_postProcess();
-		}
   
 		$this->_displayForm();
 		$this->_displayFeed();
@@ -820,7 +831,8 @@ class GoogleBase extends Module
 	private function _displayWarnings($warn)
 	{
 		$str_output = '';
-		if (!empty($warn)) {
+		if (!empty($warn))
+		{
 			$str_output .= '<script type="text/javascript">
 					$(document).ready(function() {
 						$(\'#linkSeeMore\').unbind(\'click\').click(function(){
@@ -852,7 +864,7 @@ class GoogleBase extends Module
 				.'<span style="margin-left:20px;" id="labelSeeMore">
 				<a id="linkSeeMore" href="#" style="text-decoration:underline">'.$this->l('Click here to see more').'</a>
 				<a id="linkHide" href="#" style="text-decoration:underline;display:none">'.$this->l('Hide warning').'</a></span><ul style="display:none;" id="seeMore">';
-				foreach($warn as $val)
+				foreach ($warn as $val)
 					$str_output .= '<li>'.$val.'</li>';
 				$str_output .= '</ul>';
 			}
@@ -887,7 +899,7 @@ class GoogleBase extends Module
 			else
 			{
 				echo $nbErrors.' '.$this->l('errors').'<br /><ol>';
-				foreach ($this->_mod_errors AS $error)
+				foreach ($this->_mod_errors as $error)
 					echo '<li>'.$error.'</li>';
 				echo '</ol>';
 			}
@@ -895,9 +907,9 @@ class GoogleBase extends Module
 		}
 	}
 	
-	////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-	// General support and low-level utilities
-	//
+	/*
+	 * General support and low-level utilities
+	 */
 	
 	/**
 	* Convert entities 
@@ -929,10 +941,11 @@ class GoogleBase extends Module
 	private function _xmlElement($name, $value, $encoding = false, $force_zero = false, $integer = false)
 	{
 		$element = '';
-    if ((!empty($value) && !($integer && (int)$value==0)) || $force_zero) {
+    if ((!empty($value) && !($integer && (int)$value == 0)) || $force_zero)
+		{
 			if ($encoding)
 				$value = $this->_xmlentities($value);
-			$element .= "<".$name.">".$value."</".$name.">\n";
+			$element .= '<'.$name.'>'.$value.'</'.$name.'>'."\n";
 		}
 		return $element;
 	}
@@ -966,7 +979,7 @@ class GoogleBase extends Module
 		$category = new Category(intval($id_category), intval(Configuration::get($this->name.'_lang')));
 	
 		if (!Validate::isLoadedObject($category))
-			die (Tools::displayError('Failed to load category id= '.$id_category));
+			$this->_mod_errors[] = $this->l('Error processing category with id= ').$id_category.' product_id = '.$this->current_product;
   
 		if ($category->id == 1)
 			return htmlentities($path);
@@ -977,7 +990,7 @@ class GoogleBase extends Module
 		$category_name = preg_replace('/^[0-9]+\./', '', $category->name);
   
 		if ($path != $category_name)
-			$path = $category_name.($path!='' ? $pipe.$path : '');
+			$path = $category_name.($path != '' ? $pipe.$path : '');
   
 		return $this->_getPath(intval($category->id_parent), $path);
 	}
