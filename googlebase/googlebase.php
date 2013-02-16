@@ -204,7 +204,10 @@ class GoogleBase extends Module
 		$category = new Category(intval($id_category), intval(Configuration::get($this->name.'_lang')));
 	
 		if (!Validate::isLoadedObject($category))
+		{
 			$this->_mod_errors[] = $this->l('Error processing category with id= ').$id_category.' product_id = '.$this->current_product;
+			return '';
+		}
   
 		if ($category->id == 1)
 			return htmlentities($path);
