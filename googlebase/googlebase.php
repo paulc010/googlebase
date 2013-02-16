@@ -28,6 +28,8 @@ class GoogleBase extends Module
 	private $gtin_field;
 	private $use_supplier;
 	private $nearby;
+	
+	private $current_product;
 
 	public function __construct()
 	{
@@ -182,7 +184,7 @@ class GoogleBase extends Module
 			else
 			{
 				self::$cacheCat[$id_cat] = '';
-				$this->errors[] = $this->l('Error processing category with id='.$id_cat);
+				$this->_mod_errors[] = $this->l('Error processing category with id= ').$id_cat.' product_id = '.$this->current_product;
 			}
 		}
 		return self::$cacheCat[$id_cat];
@@ -202,7 +204,7 @@ class GoogleBase extends Module
 		$category = new Category(intval($id_category), intval(Configuration::get($this->name.'_lang')));
 	
 		if (!Validate::isLoadedObject($category))
-			die (Tools::displayError('Failed to load category id= '.$id_category));
+			$this->_mod_errors[] = $this->l('Error processing category with id= ').$id_category.' product_id = '.$this->current_product;
   
 		if ($category->id == 1)
 			return htmlentities($path);
@@ -318,6 +320,8 @@ class GoogleBase extends Module
 	private function _processProduct($product)
 	{
 		$item_data = '';
+		// Maintain a copy of the current product id for more meaningful error messages
+		$this->current_product = $product['id_product'];
 		$product_link = $this->_getCompatibleProductLink($product);
 		$image_links = $this->_getCompatibleImageLinks($product);
 		
