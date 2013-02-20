@@ -415,7 +415,7 @@ class GoogleBase extends Module
 	
 	private function _getCompatiblePrice($id_product, $id_product_attrib = NULL)
 	{
-		$taxCalculationMethod = Group::getPriceDisplayMethod(Group::getCurrent()->id);
+		$taxCalculationMethod = Group::getDefaultPriceDisplayMethod();
 		if ($taxCalculationMethod == PS_TAX_EXC) {
 			$use_tax = false;
 		} else {
@@ -428,7 +428,7 @@ class GoogleBase extends Module
 	
 	private function _getCompatibleSalePrice($id_product, $id_product_attrib = NULL)
 	{
-		$taxCalculationMethod = Group::getPriceDisplayMethod(Group::getCurrent()->id);
+		$taxCalculationMethod = Group::getDefaultPriceDisplayMethod();
 		if ($taxCalculationMethod == PS_TAX_EXC) {
 			$use_tax = false;
 		} else {
