@@ -7,8 +7,7 @@ class GoogleBase extends Module
 {
 	private $_html = '';
 	private $_postErrors = array();
-	private $_compat;
-	private $_warnings;
+	private $_mod_warnings;
 	private $_mod_errors;
 	
 	private $xml_description;
@@ -38,11 +37,7 @@ class GoogleBase extends Module
 	*/
 	public function __construct()
 	{
-		// Determine major Prestashop release (only used for debug)
-		$version_mask = explode('.', _PS_VERSION_, 3);
-		$this->_compat = (int)($version_mask[0] * 10) + $version_mask[1];
-		
-		$this->_warnings = array();
+		$this->_mod_warnings = array();
 		$this->_mod_errors = array();
 		
 		$this->name = 'googlebase';
@@ -131,7 +126,7 @@ class GoogleBase extends Module
 			Configuration::updateValue($this->name.'_lang', (int)$this->context->cookie->id_lang);
 			$this->id_lang = (int)$this->context->cookie->id_lang;
 			$this->lang_iso = strtolower(Language::getIsoById($this->id_lang));
-			$this->_warnings[] = $this->l('Language configuration is invalid - reset to default.');
+			$this->_mod_warnings[] = $this->l('Language configuration is invalid - reset to default.');
 		}
 	  
 		$this->gtin_field = Configuration::get($this->name.'_gtin');
@@ -150,7 +145,7 @@ class GoogleBase extends Module
 		{
 			Configuration::updateValue($this->name.'_currency', (int)Configuration::get('PS_CURRENCY_DEFAULT'));
 			$this->id_currency = (int)Configuration::get('PS_CURRENCY_DEFAULT');
-			$this->_warnings[] = $this->l('Currency configuration is invalid - reset to default.');
+			$this->_mod_warnings[] = $this->l('Currency configuration is invalid - reset to default.');
 		}
 	  
 	}
@@ -790,12 +785,12 @@ class GoogleBase extends Module
 	*/
 	public function getContent()
 	{
-		$this->_html .= '<h2>'.$this->l('[BETA]Google Base Products Feed').' {compat='.$this->_compat.'}</h2>';
+		$this->_html .= '<h2>'.$this->l('[BETA]Google Base Products Feed').' {PS v'._PS_VERSION_.'}</h2>';
 		if (!is_writable($this->_directory()))
-			$this->_warnings[] = $this->l('Output directory must be writable or the feed file will need to be pre-created with write permissions.');
+			$this->_mod_warnings[] = $this->l('Output directory must be writable or the feed file will need to be pre-created with write permissions.');
   
-		if (isset($this->_warnings) && count($this->_warnings))
-		  $this->_displayWarnings($this->_warnings);
+		if (isset($this->_mod_warnings) && count($this->_mod_warnings))
+		  $this->_displayWarnings($this->_mod_warnings);
   
 		if (Tools::getValue('btnUpdate'))
 		{
