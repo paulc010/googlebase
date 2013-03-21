@@ -591,7 +591,7 @@ class GoogleBase extends Module
 	private function _getPrice($id_product, $id_product_attrib = null)
 	{
 		$taxCalculationMethod = Group::getDefaultPriceDisplayMethod();
-		if (($this->country == 'United States' && !$force_tax) || $taxCalculationMethod == PS_TAX_EXC)
+		if (($this->country == 'United States' && !$this->ignore_tax) || $taxCalculationMethod == PS_TAX_EXC)
       $use_tax = false;
     else
       $use_tax = true;
@@ -611,7 +611,7 @@ class GoogleBase extends Module
 	private function _getSalePrice($id_product, $id_product_attrib = null)
 	{
 		$taxCalculationMethod = Group::getDefaultPriceDisplayMethod();
-		if (($this->country == 'United States' && !$force_tax) || $taxCalculationMethod == PS_TAX_EXC)
+		if (($this->country == 'United States' && !$this->ignore_tax) || $taxCalculationMethod == PS_TAX_EXC)
       $use_tax = false;
     else
       $use_tax = true;
@@ -669,8 +669,6 @@ class GoogleBase extends Module
 	
 	private function _xmlTaxGroups($id_product)
 	{
-		  $states = array();
-		  $counties = array();
 		  $tax_groups = '';
 		  
 		  if (Country::containsStates($this->target_country->id))
@@ -679,40 +677,31 @@ class GoogleBase extends Module
 			  $tax_groups .= $this->_xmlTaxGroup((int)$id_product);
 			  $states = State::getStatesByIdCountry($this->target_country->id);
 		  
-			  foreach ($states as $state)
-				{
-				  // State default
+			   // State default
+				foreach ($states as $state)
 				  $tax_groups .= $this->_xmlTaxGroup((int)$id_product, $state);
-				  if (State::hasCounties($state['id_state']))
-					{
-					  $counties = County::getCounties($state['id_state']);
-					  foreach ($counties as $county)
-					  {
-						// County specific
-						$tax_groups .= $this->_xmlTaxGroup((int)$id_product, $state, $county);
-					  }
-				  }
-			  }
 		  } else
 			  $tax_groups .= $this->_xmlTaxGroup((int)$id_product);
 		  
 		  return $tax_groups;
 	}
   
-	private function _xmlTaxGroup($id_product, $state = null, $county = null)
+	private function _xmlTaxGroup($id_product, $state = null)
 	{
 		  $group = "<g:tax>\n";
 		  $group .= $this->_xmlElement('g:country', $this->target_country->iso_code);
 		  if (is_array($state) && isset($state['iso_code']) && isset($state['id_state']))
-			{
-			  if (is_array($county) && isset($county['name']) && isset($county['id_county']))
-				  $group .= $this->_xmlElement('g:region', $county['name']);
-			  else
-				   $group .= $this->_xmlElement('g:region', $state['iso_code']);
-		  }
-		  $rate = Tax::getProductTaxRateViaRules((int)$id_product, (int)$this->target_country->id,
-												  (int)isset($state['id_state']) ? $state['id_state'] : 0,
-												  (int)isset($county['id_county']) ? $county['id_county'] : 0);
+				$group .= $this->_xmlElement('g:region', $state['iso_code']);
+			$address = new Address();
+			$address->id_country = (int)$this->target_country->id;
+			$address->id_state = (int)isset($state['id_state']) ? $state['id_state'] : 0;
+			$id_tax_rules = (int)Product::getIdTaxRulesGroupByIdProduct($id_product, Context::getContext());
+
+			$tax_manager = TaxManagerFactory::getManager($address, $id_tax_rules);
+			$tax_calculator = $tax_manager->getTaxCalculator();
+
+			$rate = $tax_calculator->getTotalRate();
+
 		  $group .= $this->_xmlElement('g:rate', $rate);
 		  $group .= "</g:tax>\n";
 		  
