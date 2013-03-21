@@ -590,7 +590,8 @@ class GoogleBase extends Module
 	*/
 	private function _getPrice($id_product, $id_product_attrib = null)
 	{
-		 if ($this->country == 'United States' && !$force_tax)
+		$taxCalculationMethod = Group::getDefaultPriceDisplayMethod();
+		if (($this->country == 'United States' && !$force_tax) || $taxCalculationMethod == PS_TAX_EXC)
       $use_tax = false;
     else
       $use_tax = true;
@@ -609,7 +610,8 @@ class GoogleBase extends Module
 	*/
 	private function _getSalePrice($id_product, $id_product_attrib = null)
 	{
-		if ($this->country == 'United States' && !$force_tax)
+		$taxCalculationMethod = Group::getDefaultPriceDisplayMethod();
+		if (($this->country == 'United States' && !$force_tax) || $taxCalculationMethod == PS_TAX_EXC)
       $use_tax = false;
     else
       $use_tax = true;
